@@ -1,0 +1,43 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+
+# Разрешения для деплоя на GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      # 1. Скачиваем код
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Подставляем API-ключ из секрета репозитория
+      - name: Inject Yandex Maps API key
+        run: |
+          sed -i "s|__YANDEX_KEY__|${{ secrets.YANDEX_API_KEY }}|g" index.html
+
+      # 3. Загружаем файлы как артефакт Pages
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      # 4. Деплоим
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
