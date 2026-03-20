@@ -1,0 +1,343 @@
+/* =============================================================
+   АГНКС Планировщик — стили
+   -------------------------------------------------------------
+   Оглавление:
+   1. Переменные (дизайн-токены)
+   2. Сброс и базовые стили
+   3. Карта
+   4. Боковая панель управления (#controls)
+   5. Поля ввода и кнопки
+   6. Список выбранных заправок
+   7. Фильтры
+   8. Балун заправки (всплывающее окно на карте)
+   9. Мобильная адаптация (≤600px)
+   ============================================================= */
+
+
+/* ─── 1. Переменные (дизайн-токены) ────────────────────────── */
+:root {
+    /* Цвета */
+    --color-accent: #ffcc00;
+    /* Жёлтый — основной акцент */
+    --color-accent-dark: #e6b800;
+    /* Жёлтый при наведении */
+    --color-go-btn: #2e7d32;
+    /* Зелёный — кнопка "Поехали" */
+    --color-go-btn-dark: #1b5e20;
+    /* Зелёный при наведении */
+    --color-danger: #d32f2f;
+    /* Красный — кнопка удаления */
+    --color-danger-dark: #b71c1c;
+    /* Красный при наведении */
+    --color-text-main: #333;
+    --color-text-muted: #555;
+    --color-text-faint: #666;
+    --color-text-label: #444;
+    --color-border: #ccc;
+    --color-border-light: #eee;
+    --color-stop-bg: #fff8e1;
+    /* Фон карточки промежуточной остановки */
+    --color-panel-bg: rgba(255, 255, 255, 0.95);
+
+    /* Размеры */
+    --panel-width: 320px;
+    --border-radius-sm: 4px;
+    --border-radius-md: 6px;
+    --border-radius-lg: 12px;
+
+    /* Тени */
+    --shadow-panel: 0 4px 15px rgba(0, 0, 0, 0.15);
+    --shadow-stop: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --shadow-btn: 0 2px 5px rgba(0, 0, 0, 0.2);
+    --shadow-balloon-btn: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+
+/* ─── 2. Сброс и базовые стили ─────────────────────────────── */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    overflow: hidden;
+}
+
+h3 {
+    margin: 0 0 12px;
+    font-size: 18px;
+    color: var(--color-text-main);
+}
+
+
+/* ─── 3. Карта ──────────────────────────────────────────────── */
+#map {
+    width: 100%;
+    height: 100%;
+}
+
+
+/* ─── 4. Боковая панель управления ─────────────────────────── */
+#controls {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    z-index: 100;
+    width: var(--panel-width);
+    max-height: 90vh;
+    padding: 20px;
+    overflow-y: auto;
+
+    background: var(--color-panel-bg);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-panel);
+    backdrop-filter: blur(10px);
+}
+
+/* Строка статуса под кнопкой */
+#status {
+    font-size: 12px;
+    color: var(--color-text-faint);
+    margin-bottom: 10px;
+    min-height: 15px;
+}
+
+
+/* ─── 5. Поля ввода и кнопки ────────────────────────────────── */
+input[type="text"],
+button {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-md);
+    font-size: 14px;
+}
+
+input[type="text"]:focus {
+    outline: none;
+    border-color: var(--color-accent);
+}
+
+button {
+    background-color: var(--color-accent);
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--color-text-main);
+    transition: background 0.2s;
+}
+
+button:hover {
+    background-color: var(--color-accent-dark);
+}
+
+input[type="range"] {
+    width: 100%;
+    cursor: pointer;
+}
+
+
+/* ─── 6. Список выбранных заправок ─────────────────────────── */
+#route-list-container {
+    margin-top: 5px;
+    margin-bottom: 15px;
+    display: none;
+    /* показывается JS-ом после прокладки маршрута */
+}
+
+.route-list-title {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: var(--color-text-label);
+}
+
+/* Одна карточка остановки */
+.route-stop {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+
+    background: var(--color-stop-bg);
+    border-left: 3px solid var(--color-accent);
+    border-radius: var(--border-radius-sm);
+    box-shadow: var(--shadow-stop);
+    font-size: 13px;
+}
+
+.route-stop-title {
+    font-weight: bold;
+    color: var(--color-text-main);
+}
+
+/* Кнопка удаления остановки */
+.remove-btn {
+    width: auto;
+    margin: 0;
+    padding: 0 5px;
+    background: none;
+    border: none;
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--color-danger);
+    cursor: pointer;
+    transition: color 0.15s, transform 0.15s;
+}
+
+.remove-btn:hover {
+    background: none;
+    color: var(--color-danger-dark);
+    transform: scale(1.1);
+}
+
+/* Зелёная кнопка «Поехали» */
+.final-nav-btn {
+    display: block;
+    margin-top: 10px;
+    padding: 12px;
+
+    background: var(--color-go-btn);
+    color: white;
+    font-weight: bold;
+    text-align: center;
+    text-decoration: none;
+    border-radius: var(--border-radius-md);
+    box-shadow: var(--shadow-btn);
+    transition: background 0.2s;
+}
+
+.final-nav-btn:hover {
+    background: var(--color-go-btn-dark);
+}
+
+
+/* ─── 7. Фильтры ────────────────────────────────────────────── */
+.filter-group {
+    padding-top: 10px;
+    margin-bottom: 10px;
+    border-top: 1px solid var(--color-border-light);
+}
+
+.filter-label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--color-text-label);
+}
+
+.checkbox-group {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.checkbox-group input[type="checkbox"] {
+    width: auto;
+    margin-right: 8px;
+    margin-bottom: 0;
+    cursor: pointer;
+}
+
+.checkbox-group label {
+    font-size: 13px;
+    color: var(--color-text-label);
+    cursor: pointer;
+    user-select: none;
+}
+
+
+/* ─── 8. Балун заправки (всплывающее окно на карте) ─────────── */
+.station-header {
+    font-size: 15px;
+    font-weight: bold;
+    margin-bottom: 6px;
+    color: #222;
+}
+
+.station-address {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    line-height: 1.4;
+}
+
+/* Кнопка/ссылка действия внутри балуна */
+.yandex-link-btn {
+    display: block;
+    width: 100%;
+    margin-top: 15px;
+    padding: 10px 15px;
+
+    background: var(--color-accent);
+    border: none;
+    border-radius: var(--border-radius-md);
+    box-shadow: var(--shadow-balloon-btn);
+
+    color: #000;
+    font-weight: bold;
+    font-size: 13px;
+    font-family: inherit;
+    text-align: center;
+    text-decoration: none;
+
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.yandex-link-btn:hover {
+    background: var(--color-accent-dark);
+}
+
+/* Состояние «уже добавлена» */
+.yandex-link-btn:disabled,
+.yandex-link-btn[disabled] {
+    background: #ddd;
+    color: #888;
+    cursor: default;
+}
+
+
+/* ─── 9. Мобильная адаптация (≤600px) ──────────────────────── */
+/*
+   На телефоне используется паттерн «Bottom Sheet»:
+   карта занимает верхнюю половину экрана,
+   панель управления — нижнюю.
+*/
+@media (max-width: 600px) {
+    body {
+        display: flex;
+        flex-direction: column;
+    }
+
+    #map {
+        position: relative;
+        order: 1;
+        /* карта сверху */
+        width: 100%;
+        height: 50vh;
+        flex: 1;
+    }
+
+    #controls {
+        position: relative;
+        order: 2;
+        /* панель снизу */
+        top: 0;
+        left: 0;
+        width: 100%;
+        max-height: 50vh;
+        padding-bottom: 30px;
+        border-radius: 20px 20px 0 0;
+        box-shadow: 0 -4px 15px rgba(0, 0, 0, 0.1);
+        overflow-y: auto;
+    }
+}

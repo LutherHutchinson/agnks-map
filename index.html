@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>АГНКС Маршруты</title>
+
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Яндекс Карты API -->
+    <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=a5252d11-1c02-407a-9a11-cdcea2a45c23"
+        type="text/javascript"></script>
+
+    <!-- Turf.js — геометрические операции (расстояние точки до линии и т.д.) -->
+    <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+
+    <!-- База станций АГНКС загружается через fetch("stations.json") внутри app.js -->
+</head>
+
+<body>
+
+    <!-- ═══════════════════════════════════════════════════════
+         ПАНЕЛЬ УПРАВЛЕНИЯ (слева / снизу на мобиле)
+         ═══════════════════════════════════════════════════════ -->
+    <div id="controls">
+        <h3>Планировщик АГНКС</h3>
+
+        <!-- Ввод маршрута -->
+        <input type="text" id="route-from" placeholder="Откуда (например: Элиста)">
+        <input type="text" id="route-to" placeholder="Куда (например: Краснодар)">
+        <button id="build-route">Проложить маршрут</button>
+
+        <!-- Строка статуса: «Геокодирование…», «Маршрут готов!» и т.д. -->
+        <div id="status"></div>
+
+        <!-- ─── Выбранные промежуточные заправки ─────────────── -->
+        <div id="route-list-container">
+            <div class="route-list-title">Заезды по пути:</div>
+            <div id="waypoints-list"></div>
+
+            <!-- Открывает Яндекс Навигатор со всеми точками маршрута -->
+            <a id="launch-nav" href="#" target="_blank" class="final-nav-btn" style="display: none;">
+                🚗 ПОЕХАЛИ (Навигатор)
+            </a>
+        </div>
+
+        <!-- ─── Фильтр видимости заправок ────────────────────── -->
+        <div class="filter-group">
+            <div class="checkbox-group">
+                <input type="checkbox" id="show-all" checked>
+                <label for="show-all">Показывать все заправки</label>
+            </div>
+
+            <!-- Показывается, когда «показывать все» снято -->
+            <div id="distance-slider-group" style="display: none;">
+                <label for="distance-slider" class="filter-label">
+                    Искать не дальше: <strong id="distance-val">15</strong> км от трассы
+                </label>
+                <input type="range" id="distance-slider" min="1" max="150" value="15" step="1">
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         КАРТА
+         ═══════════════════════════════════════════════════════ -->
+    <div id="map"></div>
+
+    <!-- Логика приложения (после DOM, чтобы getElementById работал) -->
+    <script src="app.js"></script>
+
+</body>
+
+</html>
