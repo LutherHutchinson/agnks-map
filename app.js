@@ -5,22 +5,8 @@
  *   - Яндекс Карты API (ymaps)
  *   - Turf.js           (turf)
  *   - stations.json     (загружается через fetch)
- *
- * Оглавление:
- *   1. Константы
- *   2. Состояние приложения
- *   3. Инициализация
- *   4. Загрузка и парсинг станций
- *   5. Привязка событий UI
- *   6. Построение маршрута
- *   7. Боковая панель (список заездов)
- *   8. Фильтрация и отрисовка заправок
- *   9. Публичные функции (вызываются из HTML балунов)
- *  10. Вспомогательные функции
  */
 
-
-/* ─── 1. Константы ──────────────────────────────────────────── */
 
 /** Начальный центр карты: Ставропольский край */
 const MAP_CENTER = [45.03, 39.02];
@@ -35,8 +21,6 @@ const ROUTE_LINE_COLOR = '#1e98ff';
 const ROUTE_LINE_WIDTH = 5;
 const ROUTE_LINE_OPACITY = 0.8;
 
-
-/* ─── 2. Состояние приложения ───────────────────────────────── */
 
 let myMap;          // экземпляр ymaps.Map
 let objectManager;  // кластеризатор меток
@@ -73,8 +57,6 @@ let destName = '';
 let selectedWaypoints = [];
 
 
-/* ─── 3. Инициализация ──────────────────────────────────────── */
-
 ymaps.ready(init);
 
 async function init() {
@@ -97,8 +79,6 @@ async function init() {
     bindUIEvents();
 }
 
-
-/* ─── 4. Загрузка и парсинг станций ────────────────────────── */
 
 /**
  * Загружает stations.json через fetch и заполняет allFeatures.
@@ -170,8 +150,6 @@ function stripHtml(html) {
 }
 
 
-/* ─── 5. Привязка событий UI ────────────────────────────────── */
-
 function bindUIEvents() {
     const showAllCheckbox = document.getElementById('show-all');
     const distanceSlider = document.getElementById('distance-slider');
@@ -195,10 +173,12 @@ function bindUIEvents() {
     });
 
     document.getElementById('build-route').addEventListener('click', onBuildRouteClick);
+
+    // Кнопки "Моё местоположение"
+    document.getElementById('my-loc-from').addEventListener('click', () => useMyLocation('route-from'));
+    document.getElementById('my-loc-to').addEventListener('click', () => useMyLocation('route-to'));
 }
 
-
-/* ─── 6. Построение маршрута ────────────────────────────────── */
 
 /** Обработчик кнопки «Проложить маршрут». */
 function onBuildRouteClick() {
@@ -240,8 +220,9 @@ function onBuildRouteClick() {
 
         requestRouteAndRedraw();
 
-    }).catch(function () {
-        setStatus('Ошибка геокодирования. Попробуйте ещё раз.');
+    }).catch(function (error) {
+        console.error('Ошибка геокодирования:', error);
+        setStatus('Ошибка геокодирования. Возможно, не указан или неверен API-ключ Яндекса.');
     });
 }
 
@@ -310,12 +291,10 @@ function requestRouteAndRedraw() {
 
     }, function (error) {
         console.error('Яндекс маршруты:', error);
-        setStatus('Ошибка маршрутизации: ' + error.message);
+        setStatus('Ошибка маршрутизации (возможно нет API-ключа Яндекса): ' + error.message);
     });
 }
 
-
-/* ─── 7. Боковая панель (список заездов) ───────────────────── */
 
 /**
  * Перерисовывает список промежуточных заправок в панели
@@ -356,8 +335,6 @@ function updateRouteSidebar() {
     navBtn.href = `https://yandex.ru/maps/?rtext=${rtextParts.join('~')}`;
 }
 
-
-/* ─── 8. Фильтрация и отрисовка заправок ───────────────────── */
 
 /**
  * Фильтрует allFeatures по расстоянию от маршрута (если нужно)
@@ -476,11 +453,6 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     return html;
 }
 
-
-/* ─── 9. Публичные функции (вызываются из HTML балунов) ───────
-   Должны быть на window, так как onclick-атрибуты
-   генерируются динамически в buildBalloonHtml.            */
-
 /**
  * Добавляет заправку в маршрут и пересортировывает список
  * по позиции вдоль базовой трассы.
@@ -538,8 +510,39 @@ window.removeStation = function (index) {
     requestRouteAndRedraw();
 };
 
+/**
+ * Запрашивает геолокацию пользователя и вставляет адрес в указанное поле ввода.
+ * @param {string} inputId ID поля ввода (например, 'route-from' или 'route-to')
+ */
+function useMyLocation(inputId) {
+    if (!navigator.geolocation) {
+        alert('Геолокация не поддерживается вашим браузером');
+        return;
+    }
 
-/* ─── 10. Вспомогательные функции ──────────────────────────── */
+    setStatus('Определение местоположения...');
+    navigator.geolocation.getCurrentPosition(
+        function (position) {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+
+            // Получаем адрес через геокодер Яндекса
+            ymaps.geocode([lat, lon]).then(function (res) {
+                const firstGeoObject = res.geoObjects.get(0);
+                const address = firstGeoObject ? firstGeoObject.getAddressLine() : `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+                document.getElementById(inputId).value = address;
+                setStatus('Местоположение определено');
+            }).catch(function () {
+                document.getElementById(inputId).value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+                setStatus('Местоположение определено (без адреса)');
+            });
+        },
+        function (error) {
+            setStatus('');
+            alert('Не удалось определить местоположение. Проверьте разрешения в браузере.');
+        }
+    );
+}
 
 /**
  * Устанавливает текст строки статуса под кнопкой «Проложить маршрут».

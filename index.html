@@ -20,21 +20,25 @@
 
 <body>
 
-    <!-- ═══════════════════════════════════════════════════════
-         ПАНЕЛЬ УПРАВЛЕНИЯ (слева / снизу на мобиле)
-         ═══════════════════════════════════════════════════════ -->
+    <!-- ПАНЕЛЬ УПРАВЛЕНИЯ -->
     <div id="controls">
         <h3>Планировщик АГНКС</h3>
 
         <!-- Ввод маршрута -->
-        <input type="text" id="route-from" placeholder="Откуда (например: Элиста)">
-        <input type="text" id="route-to" placeholder="Куда (например: Краснодар)">
+        <div class="input-wrapper">
+            <input type="text" id="route-from" placeholder="Откуда (например: Элиста)">
+            <button id="my-loc-from" class="my-loc-btn" title="Моё местоположение">📍</button>
+        </div>
+        <div class="input-wrapper">
+            <input type="text" id="route-to" placeholder="Куда (например: Краснодар)">
+            <button id="my-loc-to" class="my-loc-btn" title="Моё местоположение">📍</button>
+        </div>
         <button id="build-route">Проложить маршрут</button>
 
         <!-- Строка статуса: «Геокодирование…», «Маршрут готов!» и т.д. -->
         <div id="status"></div>
 
-        <!-- ─── Выбранные промежуточные заправки ─────────────── -->
+        <!-- Выбранные промежуточные заправки -->
         <div id="route-list-container">
             <div class="route-list-title">Заезды по пути:</div>
             <div id="waypoints-list"></div>
@@ -45,7 +49,7 @@
             </a>
         </div>
 
-        <!-- ─── Фильтр видимости заправок ────────────────────── -->
+        <!-- Фильтр видимости заправок -->
         <div class="filter-group">
             <div class="checkbox-group">
                 <input type="checkbox" id="show-all" checked>
@@ -62,12 +66,10 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════
-         КАРТА
-         ═══════════════════════════════════════════════════════ -->
+    <!-- КАРТА -->
     <div id="map"></div>
 
-    <!-- Логика приложения (после DOM, чтобы getElementById работал) -->
+    <!-- Логика приложения -->
     <script src="app.js"></script>
 
 </body>
