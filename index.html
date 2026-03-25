@@ -10,27 +10,7 @@
 
     <!-- Яндекс Карты API -->
     <!-- __YANDEX_KEY__ заменяется на реальный ключ через GitHub Actions (secrets) -->
-    <script>
-        (function () {
-            var rawKey = '__YANDEX_KEY__'; // Action replaces this
-            if (rawKey === '__YANDEX_KEY__' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-                document.write('<script src="config.local.js"><\/script>');
-            }
-        })();
-    </script>
-    <script>
-        (function () {
-            var rawKey = '__YANDEX_KEY__';
-            var finalKey = '';
-            if (rawKey !== '__YANDEX_KEY__' && rawKey.trim() !== '') {
-                finalKey = rawKey;
-            } else if (typeof window.YANDEX_API_KEY_LOCAL !== 'undefined') {
-                finalKey = window.YANDEX_API_KEY_LOCAL;
-            }
-            var keyParam = finalKey ? '&apikey=' + finalKey : '';
-            document.write('<script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU' + keyParam + '" type="text/javascript"><\/script>');
-        })();
-    </script>
+    <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=__YANDEX_KEY__" type="text/javascript"></script>
 
     <!-- Turf.js — геометрические операции (расстояние точки до линии и т.д.) -->
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
