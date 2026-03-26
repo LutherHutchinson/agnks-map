@@ -9,14 +9,12 @@
     <link rel="stylesheet" href="style.css">
 
     <!-- Яндекс Карты API -->
-    <!-- __YANDEX_KEY__ заменяется на реальный ключ через GitHub Actions (secrets) -->
     <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=a5252d11-1c02-407a-9a11-cdcea2a45c23"
         type="text/javascript"></script>
 
-    <!-- Turf.js — геометрические операции (расстояние точки до линии и т.д.) -->
+    <!-- Turf.js -->
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
 
-    <!-- База станций АГНКС загружается через fetch("stations.json") внутри app.js -->
 </head>
 
 <body>
@@ -36,7 +34,7 @@
         </div>
         <button id="build-route">Проложить маршрут</button>
 
-        <!-- Строка статуса: «Геокодирование…», «Маршрут готов!» и т.д. -->
+<!-- Строка статуса -->
         <div id="status"></div>
 
         <!-- Выбранные промежуточные заправки -->
@@ -44,7 +42,6 @@
             <div class="route-list-title">Заезды по пути:</div>
             <div id="waypoints-list"></div>
 
-            <!-- Открывает Яндекс Навигатор со всеми точками маршрута -->
             <a id="launch-nav" href="#" target="_blank" class="final-nav-btn" style="display: none;">
                 🚗 ПОЕХАЛИ (Навигатор)
             </a>
@@ -57,7 +54,6 @@
                 <label for="show-all">Показывать все заправки</label>
             </div>
 
-            <!-- Показывается, когда «показывать все» снято -->
             <div id="distance-slider-group" style="display: none;">
                 <label for="distance-slider" class="filter-label">
                     Искать не дальше: <strong id="distance-val">15</strong> км от трассы
@@ -70,7 +66,6 @@
     <!-- КАРТА -->
     <div id="map"></div>
 
-    <!-- Логика приложения -->
     <script src="app.js?v=2"></script>
 
 </body>

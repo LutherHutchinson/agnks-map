@@ -7,56 +7,40 @@
  *   - stations.json     (загружается через fetch)
  */
 
-
-/** Начальный центр карты: Вся Россия (десктоп) */
+/** Начальный центр карты: Вся Россия */
 const isMobile = window.innerWidth <= 600;
 const MAP_CENTER = isMobile ? [56.52401, 87.318756] : [56.52401, 90.318756];
 const MAP_ZOOM = isMobile ? 1.5 : 4;
 
-/** Яндекс-пресеты иконок заправок */
+// Иконки меток
 const ICON_STATION_DEFAULT = 'islands#blueIcon';
 const ICON_STATION_ADDED = 'islands#redIcon';
 
-/** Стиль маршрутной линии */
+// Стиль маршрута
 const ROUTE_LINE_COLOR = '#1e98ff';
 const ROUTE_LINE_WIDTH = 5;
 const ROUTE_LINE_OPACITY = 0.8;
 
+let myMap;
+let objectManager;
+let routeObj = null;
 
-let myMap;          // экземпляр ymaps.Map
-let objectManager;  // кластеризатор меток
-let routeObj = null;// текущая линия маршрута на карте
-
-/**
- * Все заправки из stations.js в нормализованном виде.
- * @type {Array<GeoJSON.Feature>}
- */
+// База всех заправок
 let allFeatures = [];
 
-/**
- * Полный маршрут (с заездами) в формате Turf — [lon, lat][].
- * Яндекс возвращает [lat, lon], поэтому координаты инвертируются перед сохранением.
- */
+// Координаты маршрута для Turf.js [lon, lat]
 let routeGeoJsonCoords = null;
 
-/**
- * Первоначальный маршрут A→Б без заездов.
- * Используется как «линейка» для сортировки промежуточных заправок
- * в правильном порядке вдоль трассы.
- */
+// Базовый маршрут (для сортировки заездов)
 let baseRouteGeoJsonCoords = null;
 
-let originGeo = null; // [lat, lon] — стартовая точка
-let destGeo = null; // [lat, lon] — конечная точка
+let originGeo = null;
+let destGeo = null;
 let originName = '';
 let destName = '';
 
-/**
- * Промежуточные заправки, выбранные пользователем.
- * @type {Array<{id: number, name: string, lat: number, lon: number}>}
- */
+// Остановки пользователя
 let selectedWaypoints = [];
-
 
 ymaps.ready(init);
 
@@ -67,7 +51,6 @@ async function init() {
         controls: ['zoomControl', 'fullscreenControl']
     });
 
-    // ObjectManager кластеризует метки заправок для быстрой отрисовки
     objectManager = new ymaps.ObjectManager({
         clusterize: true,
         gridSize: 40,
@@ -80,11 +63,7 @@ async function init() {
     bindUIEvents();
 }
 
-
-/**
- * Загружает stations.json через fetch и заполняет allFeatures.
- * Async: карта рендерится сразу, данные подгружаются в фоне.
- */
+// Загрузка базы станций
 async function loadStations() {
     setStatus('Загрузка базы станций…');
 
@@ -107,18 +86,11 @@ async function loadStations() {
     setStatus('');
     filterAndRenderStations();
 
-    /**
-     * Превращает сырую GeoJSON-фичу из stations.json в чистый объект
-     * с именем и адресом без HTML-тегов.
-     *
-     * @param {object} item — элемент из stationsData
-     * @returns {GeoJSON.Feature}
-     */
+    // Нормализация данных станции
     function parseStation(item) {
         const nameClean = stripHtml(item.properties.hintContent || 'АГНКС');
         let addressClean = stripHtml(item.properties.balloonContentBody || '');
 
-        // В балунах Яндекса иногда остаётся слово «подробнее» — убираем
         addressClean = addressClean.replace('подробнее', '').trim();
 
         return {
@@ -138,11 +110,6 @@ async function loadStations() {
         };
     }
 
-    /**
-     * Извлекает чистый текст из строки с HTML.
-     * @param {string} html
-     * @returns {string}
-     */
     function stripHtml(html) {
         const div = document.createElement('div');
         div.innerHTML = html;
@@ -156,31 +123,25 @@ function bindUIEvents() {
     const distanceValLabel = document.getElementById('distance-val');
     const sliderGroup = document.getElementById('distance-slider-group');
 
-    // Переключаем видимость ползунка и перерисовываем метки
     showAllCheckbox.addEventListener('change', function (e) {
         sliderGroup.style.display = e.target.checked ? 'none' : 'block';
         filterAndRenderStations();
     });
 
-    // Обновляем числовой лейбл рядом с ползунком (без запроса маршрута)
     distanceSlider.addEventListener('input', function (e) {
         distanceValLabel.innerText = e.target.value;
     });
 
-    // Перерисовываем метки только когда пользователь отпустил ползунок
     distanceSlider.addEventListener('change', function () {
         filterAndRenderStations();
     });
 
     document.getElementById('build-route').addEventListener('click', onBuildRouteClick);
 
-    // Кнопки "Моё местоположение"
     document.getElementById('my-loc-from').addEventListener('click', () => useMyLocation('route-from'));
     document.getElementById('my-loc-to').addEventListener('click', () => useMyLocation('route-to'));
 }
 
-
-/** Обработчик кнопки «Проложить маршрут». */
 function onBuildRouteClick() {
     const fromInput = document.getElementById('route-from').value.trim();
     const toInput = document.getElementById('route-to').value.trim();
@@ -192,7 +153,6 @@ function onBuildRouteClick() {
 
     setStatus('Геокодирование адресов...');
 
-    // Параллельно определяем координаты обеих точек
     Promise.all([
         ymaps.geocode(fromInput),
         ymaps.geocode(toInput)
@@ -226,16 +186,12 @@ function onBuildRouteClick() {
     });
 }
 
-/**
- * Строит маршрут через Яндекс API, рисует линию на карте,
- * обновляет боковую панель и перефильтровывает метки заправок.
- */
+// Построение маршрута
 function requestRouteAndRedraw() {
     if (!originGeo || !destGeo) return;
 
     setStatus('Прокладываю маршрут…');
 
-    // Собираем точки: старт → промежуточные заправки → финиш
     const routePoints = [
         originGeo,
         ...selectedWaypoints.map(wp => ({ type: 'wayPoint', point: [wp.lat, wp.lon] })),
@@ -243,12 +199,10 @@ function requestRouteAndRedraw() {
     ];
 
     ymaps.route(routePoints).then(function (route) {
-        // Удаляем старую линию, если была
         if (routeObj) {
             myMap.geoObjects.remove(routeObj);
         }
 
-        // Собираем точные координаты из всех сегментов пути
         let coords = [];
         route.getPaths().each(function (path) {
             const segments = path.getSegments() || [];
@@ -265,7 +219,6 @@ function requestRouteAndRedraw() {
             return;
         }
 
-        // Рисуем синюю линию маршрута
         routeObj = new ymaps.Polyline(coords, {}, {
             strokeColor: ROUTE_LINE_COLOR,
             strokeWidth: ROUTE_LINE_WIDTH,
@@ -273,10 +226,10 @@ function requestRouteAndRedraw() {
         });
         myMap.geoObjects.add(routeObj);
 
-        // Яндекс даёт [lat, lon] — инвертируем в [lon, lat] для Turf.js
+        // Инверсия координат для Turf.js: [lat, lon] -> [lon, lat]
         routeGeoJsonCoords = coords.map(c => [c[1], c[0]]);
 
-        // Первый построенный маршрут (без заездов) сохраняем как эталон сортировки
+        // Сохранение базового маршрута (эталон для сортировки)
         if (selectedWaypoints.length === 0) {
             baseRouteGeoJsonCoords = routeGeoJsonCoords;
             myMap.setBounds(routeObj.geometry.getBounds(), {
@@ -295,11 +248,7 @@ function requestRouteAndRedraw() {
     });
 }
 
-
-/**
- * Перерисовывает список промежуточных заправок в панели
- * и обновляет ссылку кнопки «Поехали».
- */
+// Обновление боковой панели
 function updateRouteSidebar() {
     const container = document.getElementById('route-list-container');
     const listEl = document.getElementById('waypoints-list');
@@ -313,8 +262,6 @@ function updateRouteSidebar() {
     container.style.display = 'block';
     listEl.innerHTML = '';
 
-    // Формируем параметр rtext для Яндекс Навигатора:
-    // координаты разделяются ~, порядок: старт → заезды → финиш
     const rtextParts = [`${originGeo[0]},${originGeo[1]}`];
 
     selectedWaypoints.forEach((wp, index) => {
@@ -335,11 +282,7 @@ function updateRouteSidebar() {
     navBtn.href = `https://yandex.ru/maps/?rtext=${rtextParts.join('~')}`;
 }
 
-
-/**
- * Фильтрует allFeatures по расстоянию от маршрута (если нужно)
- * и отображает результат через ObjectManager.
- */
+// Фильтрация и рендер заправок
 function filterAndRenderStations() {
     const showAll = document.getElementById('show-all').checked;
     const maxDistKm = parseFloat(document.getElementById('distance-slider').value);
@@ -347,7 +290,6 @@ function filterAndRenderStations() {
 
     objectManager.removeAll();
 
-    // Строим объект линии Turf один раз — используем для всех дистанций
     const routeLine = buildTurfRouteLine(showAll, isRouteActive);
 
     const filtered = allFeatures.filter(feature => {
@@ -355,14 +297,11 @@ function filterAndRenderStations() {
         const stId = feature.id;
         const isAdded = selectedWaypoints.some(w => w.id == stId);
 
-        // Обновляем балун и иконку перед рендером
         feature.properties.balloonContentBody = buildBalloonHtml(feature, latS, lonS, stId, isRouteActive);
         feature.options = { preset: isAdded ? ICON_STATION_ADDED : ICON_STATION_DEFAULT };
 
-        // Без активного фильтра показываем все заправки
         if (showAll || !routeLine) return true;
 
-        // Считаем расстояние от заправки до линии маршрута
         let distanceKm = Infinity;
         try {
             distanceKm = turf.pointToLineDistance(
@@ -379,7 +318,6 @@ function filterAndRenderStations() {
 
     objectManager.add(filtered);
 
-    // ObjectManager иногда кэширует старые стили — принудительно обновляем
     filtered.forEach(f => {
         if (f.options) {
             objectManager.objects.setObjectOptions(f.id, f.options);
@@ -387,21 +325,13 @@ function filterAndRenderStations() {
     });
 }
 
-/**
- * Создаёт Turf-линию из routeGeoJsonCoords.
- * Перед созданием удаляет дублирующиеся подряд точки (Turf их не принимает).
- *
- * @param {boolean} showAll       — если true, фильтр отключён, линия не нужна
- * @param {boolean} isRouteActive — маршрут прложен?
- * @returns {turf.Feature<turf.LineString> | null}
- */
+// Создание Turf-линии маршрута
 function buildTurfRouteLine(showAll, isRouteActive) {
     if (showAll || !isRouteActive || routeGeoJsonCoords.length < 2) {
         return null;
     }
 
     try {
-        // Убираем соседние дубликаты координат
         const uniqueCoords = routeGeoJsonCoords.filter((coord, i, arr) => {
             if (i === 0) return true;
             const prev = arr[i - 1];
@@ -422,16 +352,7 @@ function buildTurfRouteLine(showAll, isRouteActive) {
     }
 }
 
-/**
- * Генерирует HTML-содержимое балуна для одной заправки.
- *
- * @param {GeoJSON.Feature} feature
- * @param {number}          latS        — широта (Яндекс-формат)
- * @param {number}          lonS        — долгота
- * @param {number}          stId        — ID станции
- * @param {boolean}         isRouteActive
- * @returns {string} HTML
- */
+// Разметка балуна
 function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const singleNavLink = `https://yandex.ru/maps/?rtext=~${latS},${lonS}`;
 
@@ -453,12 +374,7 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     return html;
 }
 
-/**
- * Добавляет заправку в маршрут и пересортировывает список
- * по позиции вдоль базовой трассы.
- *
- * @param {number} stationId
- */
+// Добавление остановки
 window.addStationToRoute = function (stationId) {
     const station = allFeatures.find(f => f.id == stationId);
     if (!station) return;
@@ -475,8 +391,7 @@ window.addStationToRoute = function (stationId) {
         lon: station.geometry.coordinates[1]
     });
 
-    // Сортируем заправки по месту проекции на базовый маршрут,
-    // чтобы порядок заездов всегда соответствовал направлению движения
+    // Сортировка по порядку на маршруте
     if (baseRouteGeoJsonCoords && baseRouteGeoJsonCoords.length >= 2) {
         try {
             const baseLine = turf.lineString(baseRouteGeoJsonCoords);
@@ -501,19 +416,13 @@ window.addStationToRoute = function (stationId) {
     requestRouteAndRedraw();
 };
 
-/**
- * Удаляет промежуточную заправку по индексу в списке.
- * @param {number} index
- */
+// Удаление остановки
 window.removeStation = function (index) {
     selectedWaypoints.splice(index, 1);
     requestRouteAndRedraw();
 };
 
-/**
- * Запрашивает геолокацию пользователя и вставляет адрес в указанное поле ввода.
- * @param {string} inputId ID поля ввода (например, 'route-from' или 'route-to')
- */
+// Определение геолокации
 function useMyLocation(inputId) {
     if (!navigator.geolocation) {
         alert('Геолокация не поддерживается вашим браузером');
@@ -526,7 +435,6 @@ function useMyLocation(inputId) {
             const lat = position.coords.latitude;
             const lon = position.coords.longitude;
 
-            // Получаем адрес через геокодер Яндекса
             ymaps.geocode([lat, lon]).then(function (res) {
                 const firstGeoObject = res.geoObjects.get(0);
                 const address = firstGeoObject ? firstGeoObject.getAddressLine() : `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
@@ -544,10 +452,6 @@ function useMyLocation(inputId) {
     );
 }
 
-/**
- * Устанавливает текст строки статуса под кнопкой «Проложить маршрут».
- * @param {string} text
- */
 function setStatus(text) {
     document.getElementById('status').innerText = text;
 }

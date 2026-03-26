@@ -1,20 +1,13 @@
 /* АГНКС Планировщик — стили*/
 
-
 :root {
     /* Цвета */
     --color-accent: #ffcc00;
-    /* Жёлтый — основной акцент */
     --color-accent-dark: #e6b800;
-    /* Жёлтый при наведении */
     --color-go-btn: #2e7d32;
-    /* Зелёный — кнопка "Поехали" */
     --color-go-btn-dark: #1b5e20;
-    /* Зелёный при наведении */
     --color-danger: #d32f2f;
-    /* Красный — кнопка удаления */
     --color-danger-dark: #b71c1c;
-    /* Красный при наведении */
     --color-text-main: #333;
     --color-text-muted: #555;
     --color-text-faint: #666;
@@ -22,7 +15,6 @@
     --color-border: #ccc;
     --color-border-light: #eee;
     --color-stop-bg: #fff8e1;
-    /* Фон карточки промежуточной остановки */
     --color-panel-bg: rgba(255, 255, 255, 0.95);
 
     /* Размеры */
@@ -37,7 +29,6 @@
     --shadow-btn: 0 2px 5px rgba(0, 0, 0, 0.2);
     --shadow-balloon-btn: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
-
 
 /* Базовые стили */
 *,
@@ -62,13 +53,11 @@ h3 {
     color: var(--color-text-main);
 }
 
-
 /* Карта */
 #map {
     width: 100%;
     height: 100%;
 }
-
 
 /* Боковая панель управления */
 #controls {
@@ -95,7 +84,6 @@ h3 {
     min-height: 15px;
 }
 
-
 /* Поля ввода и кнопки */
 
 .input-wrapper {
@@ -107,7 +95,6 @@ h3 {
 .input-wrapper input[type="text"],
 .input-wrapper button {
     margin-bottom: 0;
-    /* Override default margin */
 }
 
 .input-wrapper input[type="text"] {
@@ -161,13 +148,11 @@ input[type="range"] {
     cursor: pointer;
 }
 
-
 /* Список выбранных заправок */
 #route-list-container {
     margin-top: 5px;
     margin-bottom: 15px;
     display: none;
-    /* показывается JS-ом после прокладки маршрута */
 }
 
 .route-list-title {
@@ -177,7 +162,7 @@ input[type="range"] {
     color: var(--color-text-label);
 }
 
-/* Одна карточка остановки */
+/* Карточка остановки */
 .route-stop {
     display: flex;
     justify-content: space-between;
@@ -217,7 +202,7 @@ input[type="range"] {
     transform: scale(1.1);
 }
 
-/* Зелёная кнопка «Поехали» */
+/* Кнопка «Поехали» */
 .final-nav-btn {
     display: block;
     margin-top: 10px;
@@ -236,7 +221,6 @@ input[type="range"] {
 .final-nav-btn:hover {
     background: var(--color-go-btn-dark);
 }
-
 
 /* Фильтры */
 .filter-group {
@@ -272,8 +256,7 @@ input[type="range"] {
     user-select: none;
 }
 
-
-/* Балун заправки (всплывающее окно на карте) */
+/* Балун заправки */
 .station-header {
     font-size: 15px;
     font-weight: bold;
@@ -287,7 +270,7 @@ input[type="range"] {
     line-height: 1.4;
 }
 
-/* Кнопка/ссылка действия внутри балуна */
+/* Кнопка внутри балуна */
 .yandex-link-btn {
     display: block;
     width: 100%;
@@ -314,7 +297,7 @@ input[type="range"] {
     background: var(--color-accent-dark);
 }
 
-/* Состояние «уже добавлена» */
+/* Кнопка в состоянии disabled */
 .yandex-link-btn:disabled,
 .yandex-link-btn[disabled] {
     background: #ddd;
@@ -322,13 +305,7 @@ input[type="range"] {
     cursor: default;
 }
 
-
-/* Мобильная адаптация (≤600px) */
-/*
-   На телефоне используется паттерн «Bottom Sheet»:
-   карта занимает верхнюю половину экрана,
-   панель управления — нижнюю.
-*/
+/* Мобильная адаптация (Bottom Sheet) */
 @media (max-width: 600px) {
     body {
         display: flex;
@@ -338,7 +315,6 @@ input[type="range"] {
     #map {
         position: relative;
         order: 1;
-        /* карта сверху */
         width: 100%;
         height: 60vh;
         flex: 1;
@@ -347,7 +323,6 @@ input[type="range"] {
     #controls {
         position: relative;
         order: 2;
-        /* панель снизу */
         top: 0;
         left: 0;
         width: 100%;
