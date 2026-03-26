@@ -8,9 +8,10 @@
  */
 
 
-/** Начальный центр карты: Вся Россия */
-const MAP_CENTER = [56.52401, 90.318756]; // Координаты центра России (примерно)
-const MAP_ZOOM = 4; // Отдаление, чтобы было видно страну без лишнего мира
+/** Начальный центр карты: Вся Россия (десктоп) */
+const isMobile = window.innerWidth <= 600;
+const MAP_CENTER = isMobile ? [56.52401, 87.318756] : [56.52401, 90.318756];
+const MAP_ZOOM = isMobile ? 1.5 : 4;
 
 /** Яндекс-пресеты иконок заправок */
 const ICON_STATION_DEFAULT = 'islands#blueIcon';
