@@ -8,9 +8,9 @@
  */
 
 
-/** Начальный центр карты: Ставропольский край */
-const MAP_CENTER = [45.03, 39.02];
-const MAP_ZOOM = 5;
+/** Начальный центр карты: Вся Россия */
+const MAP_CENTER = [56.52401, 90.318756]; // Координаты центра России (примерно)
+const MAP_ZOOM = 4; // Отдаление, чтобы было видно страну без лишнего мира
 
 /** Яндекс-пресеты иконок заправок */
 const ICON_STATION_DEFAULT = 'islands#blueIcon';
@@ -105,50 +105,49 @@ async function loadStations() {
 
     setStatus('');
     filterAndRenderStations();
+
+    /**
+     * Превращает сырую GeoJSON-фичу из stations.json в чистый объект
+     * с именем и адресом без HTML-тегов.
+     *
+     * @param {object} item — элемент из stationsData
+     * @returns {GeoJSON.Feature}
+     */
+    function parseStation(item) {
+        const nameClean = stripHtml(item.properties.hintContent || 'АГНКС');
+        let addressClean = stripHtml(item.properties.balloonContentBody || '');
+
+        // В балунах Яндекса иногда остаётся слово «подробнее» — убираем
+        addressClean = addressClean.replace('подробнее', '').trim();
+
+        return {
+            type: 'Feature',
+            id: item.id,
+            geometry: {
+                type: 'Point',
+                coordinates: item.geometry.coordinates // [lat, lon] — формат Яндекса
+            },
+            properties: {
+                nameClean,
+                addressClean,
+                clusterCaption: item.properties.clusterCaption,
+                hintContent: nameClean,
+                rawCoords: item.geometry.coordinates
+            }
+        };
+    }
+
+    /**
+     * Извлекает чистый текст из строки с HTML.
+     * @param {string} html
+     * @returns {string}
+     */
+    function stripHtml(html) {
+        const div = document.createElement('div');
+        div.innerHTML = html;
+        return div.textContent || div.innerText || '';
+    }
 }
-
-/**
- * Превращает сырую GeoJSON-фичу из stations.json в чистый объект
- * с именем и адресом без HTML-тегов.
- *
- * @param {object} item — элемент из stationsData
- * @returns {GeoJSON.Feature}
- */
-function parseStation(item) {
-    const nameClean = stripHtml(item.properties.hintContent || 'АГНКС');
-    let addressClean = stripHtml(item.properties.balloonContentBody || '');
-
-    // В балунах Яндекса иногда остаётся слово «подробнее» — убираем
-    addressClean = addressClean.replace('подробнее', '').trim();
-
-    return {
-        type: 'Feature',
-        id: item.id,
-        geometry: {
-            type: 'Point',
-            coordinates: item.geometry.coordinates // [lat, lon] — формат Яндекса
-        },
-        properties: {
-            nameClean,
-            addressClean,
-            clusterCaption: item.properties.clusterCaption,
-            hintContent: nameClean,
-            rawCoords: item.geometry.coordinates
-        }
-    };
-}
-
-/**
- * Извлекает чистый текст из строки с HTML.
- * @param {string} html
- * @returns {string}
- */
-function stripHtml(html) {
-    const div = document.createElement('div');
-    div.innerHTML = html;
-    return div.textContent || div.innerText || '';
-}
-
 
 function bindUIEvents() {
     const showAllCheckbox = document.getElementById('show-all');
