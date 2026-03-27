@@ -34,7 +34,7 @@
         </div>
         <button id="build-route">Проложить маршрут</button>
 
-<!-- Строка статуса -->
+        <!-- Строка статуса -->
         <div id="status"></div>
 
         <!-- Выбранные промежуточные заправки -->
@@ -59,6 +59,50 @@
                     Искать не дальше: <strong id="distance-val">15</strong> км от трассы
                 </label>
                 <input type="range" id="distance-slider" min="1" max="150" value="15" step="1">
+            </div>
+        </div>
+
+        <!-- Фильтр по удобствам -->
+        <div class="filter-group">
+            <button class="amenity-filter-toggle" id="amenity-toggle" type="button">
+                Фильтр по удобствам <span id="amenity-toggle-arrow">▸</span>
+            </button>
+            <div id="amenity-filter-panel" style="display:none;">
+                <div class="amenity-filter-note">Только для заправок Газпрома</div>
+
+                <div class="amenity-category">Время работы</div>
+                <div class="amenity-checkboxes">
+                    <label><input type="checkbox" data-amenity="around_the_clock"> 🕐 Круглосуточно</label>
+                </div>
+
+                <div class="amenity-category">Оплата</div>
+                <div class="amenity-checkboxes">
+                    <label><input type="checkbox" data-amenity="payment_sce"> 🪪 Карта ECOGAS</label>
+                    <label><input type="checkbox" data-amenity="payment_bc"> 💳 Банковские карты</label>
+                    <label><input type="checkbox" data-amenity="payment_c"> � Наличные</label>
+                </div>
+
+                <div class="amenity-category">Виды топлива</div>
+                <div class="amenity-checkboxes">
+                    <label><input type="checkbox" data-amenity="cng"> � КПГ</label>
+                    <label><input type="checkbox" data-amenity="lng"> ❄️ СПГ</label>
+                </div>
+
+                <div class="amenity-category">Услуги для вас</div>
+                <div class="amenity-checkboxes">
+                    <label><input type="checkbox" data-amenity="cafe"> ☕ Кафе</label>
+                    <label><input type="checkbox" data-amenity="shop"> 🛍️ Магазин</label>
+                    <label><input type="checkbox" data-amenity="wc"> 🚻 Туалет</label>
+                </div>
+
+                <div class="amenity-category">Услуги для автомобиля</div>
+                <div class="amenity-checkboxes">
+                    <label><input type="checkbox" data-amenity="charging"> ⚡ Зарядка для электрокаров</label>
+                    <label><input type="checkbox" data-amenity="washing"> 🚗 Автоматическая мойка</label>
+                    <label><input type="checkbox" data-amenity="tire_inflation"> 🔧 Подкачка шин</label>
+                </div>
+
+                <button id="reset-amenity-filters" type="button" class="reset-filters-btn">✕ Сбросить фильтры</button>
             </div>
         </div>
     </div>

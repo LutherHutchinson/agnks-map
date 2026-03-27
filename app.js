@@ -14,7 +14,7 @@ const MAP_ZOOM = isMobile ? 1.5 : 4;
 
 // Иконки меток
 const ICON_STATION_DEFAULT = 'islands#blueIcon';
-const ICON_STATION_ADDED = 'islands#redIcon';
+const ICON_STATION_ADDED = 'islands#greenIcon';
 
 // Стиль маршрута
 const ROUTE_LINE_COLOR = '#1e98ff';
@@ -85,7 +85,7 @@ async function loadStations() {
     }
 
     const itemsGazprom = gazpromData.elements ? gazpromData.elements : gazpromData;
-    const tolerance = 0.001; // ~100 метров погрешности при совпадении координат
+    const tolerance = 0.01; // ~1 км погрешности при совпадении координат из разных источников
 
     // Сначала парсим заправки Газпрома
     itemsGazprom.forEach(function (item) {
@@ -122,24 +122,41 @@ async function loadStations() {
         const coords = el.gps.split(',').map(s => parseFloat(s.trim()));
         if (!coords || coords.length !== 2 || isNaN(coords[0]) || (coords[0] === 0 && coords[1] === 0)) return null;
 
-        const nameClean = stripHtml(el.name || 'АГНКС');
-        const workTimeStr = el.work_time ? `<br/>Время работы: ${el.work_time}` : '';
-        const addressClean = stripHtml(el.address || '') + workTimeStr;
+        const nameClean = stripHtml(el.name || 'АГНКС').replace(/^Временно не работает \((.+)\)$/, '$1');
+        const addressClean = stripHtml((el.address || '').replace(/^Временно не работает \((.+)\)$/, '$1'));
+        const scheduleClean = el.schedule || '';
+        const isClosed = scheduleClean === 'Временно не работает';
 
         return {
             type: 'Feature',
             id: el.id,
             geometry: {
                 type: 'Point',
-                coordinates: coords // [lat, lon]
+                coordinates: coords
             },
             properties: {
                 nameClean,
                 addressClean,
+                scheduleClean,
+                isClosed,
                 clusterCaption: el.city ? `${el.city}, ${nameClean}` : nameClean,
                 hintContent: nameClean,
                 rawCoords: coords,
-                gazpromUrl: el.url
+                gazpromUrl: el.url,
+                amenities: {
+                    around_the_clock: !!el.around_the_clock,
+                    payment_sce: !!el.payment_sce,
+                    payment_bc: !!el.payment_bc,
+                    payment_c: !!el.payment_c,
+                    cng: !!el.cng,
+                    lng: !!el.lng,
+                    cafe: !!el.cafe,
+                    shop: !!el.shop,
+                    wc: !!el.wc,
+                    charging: !!el.charging_for_electric_cars,
+                    washing: !!el.automatic_washing,
+                    tire_inflation: !!el.tire_inflation
+                }
             }
         };
     }
@@ -147,20 +164,45 @@ async function loadStations() {
     // Нормализация данных стандартной станции
     function parseStation(item) {
         const nameClean = stripHtml(item.properties.hintContent || 'АГНКС');
-        let addressClean = stripHtml(item.properties.balloonContentBody || '');
 
-        addressClean = addressClean.replace('подробнее', '').trim();
+        // Сохраняем разрывы строк перед strip
+        const rawBody = (item.properties.balloonContentBody || '')
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/p>/gi, '\n')
+            .replace(/подробнее/gi, '');
+
+        const bodyClean = stripHtml(rawBody);
+
+        // Разбиваем на строки и классифицируем
+        const lines = bodyClean.split('\n').map(s => s.trim()).filter(Boolean);
+
+        const phoneRegex = /(\+7|8\s*[\(\-]?\d{3}|\бтел\b|факс)/i;
+        const scheduleRegex = /\d{1,2}:\d{2}|ежедневн|круглосуточно|пн|вт|ср|чт|пт|сб|вс|суббот|воскрес|выходн|перерыв|режим раб|принима|без перерыв/i;
+
+        const addressLines = [], scheduleLines = [], phoneLines = [];
+
+        for (const line of lines) {
+            if (phoneRegex.test(line)) {
+                phoneLines.push(line);
+            } else if (scheduleRegex.test(line)) {
+                scheduleLines.push(line);
+            } else {
+                addressLines.push(line);
+            }
+        }
 
         return {
             type: 'Feature',
             id: item.id,
             geometry: {
                 type: 'Point',
-                coordinates: item.geometry.coordinates // [lat, lon]
+                coordinates: item.geometry.coordinates
             },
             properties: {
                 nameClean,
-                addressClean,
+                addressClean: addressLines.join(', '),
+                scheduleClean: scheduleLines.join('; ') || null,
+                phoneClean: phoneLines.join('; ') || null,
                 clusterCaption: item.properties.clusterCaption,
                 hintContent: nameClean,
                 rawCoords: item.geometry.coordinates
@@ -198,6 +240,35 @@ function bindUIEvents() {
 
     document.getElementById('my-loc-from').addEventListener('click', () => useMyLocation('route-from'));
     document.getElementById('my-loc-to').addEventListener('click', () => useMyLocation('route-to'));
+
+    // Фильтр по удобствам — кнопка раскрытия
+    document.getElementById('amenity-toggle').addEventListener('click', function () {
+        const panel = document.getElementById('amenity-filter-panel');
+        const arrow = document.getElementById('amenity-toggle-arrow');
+        const open = panel.style.display === 'none';
+        panel.style.display = open ? 'block' : 'none';
+        arrow.textContent = open ? '▾' : '▸';
+    });
+
+    // При смене любого чекбокса удобств — перефильтровать
+    document.querySelectorAll('[data-amenity]').forEach(cb => {
+        cb.addEventListener('change', filterAndRenderStations);
+    });
+
+    // Сбросить фильтры
+    document.getElementById('reset-amenity-filters').addEventListener('click', function () {
+        document.querySelectorAll('[data-amenity]').forEach(cb => { cb.checked = false; });
+        filterAndRenderStations();
+    });
+}
+
+// Возвращает список выбранных фильтров по удобствам
+function getSelectedAmenities() {
+    const selected = [];
+    document.querySelectorAll('[data-amenity]:checked').forEach(cb => {
+        selected.push(cb.dataset.amenity);
+    });
+    return selected;
 }
 
 function onBuildRouteClick() {
@@ -345,6 +416,7 @@ function filterAndRenderStations() {
     const showAll = document.getElementById('show-all').checked;
     const maxDistKm = parseFloat(document.getElementById('distance-slider').value);
     const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
+    const amenityFilter = getSelectedAmenities();
 
     objectManager.removeAll();
 
@@ -356,9 +428,17 @@ function filterAndRenderStations() {
         const isAdded = selectedWaypoints.some(w => w.id == stId);
 
         feature.properties.balloonContentBody = buildBalloonHtml(feature, latS, lonS, stId, isRouteActive);
-        feature.options = { preset: isAdded ? ICON_STATION_ADDED : ICON_STATION_DEFAULT };
+        const isClosed = feature.properties.isClosed;
+        feature.options = {
+            preset: isAdded ? ICON_STATION_ADDED
+                : isClosed ? 'islands#redDotIcon'
+                    : ICON_STATION_DEFAULT
+        };
 
-        if (showAll || !routeLine) return true;
+        if (showAll || !routeLine) {
+            // Только фильтр по удобствам
+            return amenityFilter.length === 0 || passesAmenityFilter(feature, amenityFilter);
+        }
 
         let distanceKm = Infinity;
         try {
@@ -371,7 +451,8 @@ function filterAndRenderStations() {
             console.error(`Turf: ошибка для станции ${stId}:`, e);
         }
 
-        return distanceKm <= maxDistKm;
+        return distanceKm <= maxDistKm
+            && (amenityFilter.length === 0 || passesAmenityFilter(feature, amenityFilter));
     });
 
     objectManager.add(filtered);
@@ -381,6 +462,13 @@ function filterAndRenderStations() {
             objectManager.objects.setObjectOptions(f.id, f.options);
         }
     });
+}
+
+// Проверяет, соответствует ли заправка фильтрам по удобствам
+function passesAmenityFilter(feature, amenities) {
+    const am = feature.properties.amenities;
+    if (!am) return false; // нет данных об удобствах — не подходит
+    return amenities.every(key => am[key]);
 }
 
 // Создание Turf-линии маршрута
@@ -410,15 +498,61 @@ function buildTurfRouteLine(showAll, isRouteActive) {
     }
 }
 
+// Иконки удобств для заправок Газпрома
+function buildAmenitiesHtml(am) {
+    const items = [
+        { key: 'around_the_clock', icon: '🕐', label: 'Круглосуточно' },
+        { key: 'cng', icon: '🔵', label: 'КПГ' },
+        { key: 'lng', icon: '❄️', label: 'СПГ' },
+        { key: 'payment_bc', icon: '💳', label: 'Банковские карты' },
+        { key: 'payment_c', icon: '💵', label: 'Наличные' },
+        { key: 'payment_sce', icon: '🪪', label: 'Карта ECOGAS' },
+        { key: 'cafe', icon: '☕', label: 'Кафе' },
+        { key: 'shop', icon: '🛍️', label: 'Магазин' },
+        { key: 'wc', icon: '🚻', label: 'Туалет' },
+        { key: 'charging', icon: '⚡', label: 'Зарядка для электрокаров' },
+        { key: 'washing', icon: '🚗', label: 'Автомойка' },
+        { key: 'tire_inflation', icon: '🔧', label: 'Подкачка шин' }
+    ].filter(item => am[item.key]);
+
+    if (!items.length) return '';
+
+    return items.map(item =>
+        `<span class="amenity-badge" title="${item.label}">${item.icon} ${item.label}</span>`
+    ).join('');
+}
+
 // Разметка балуна
 function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const singleNavLink = `https://yandex.ru/maps/?rtext=~${latS},${lonS}`;
     const placeLink = `https://yandex.ru/maps/?text=${latS},${lonS}`;
 
-    let html = `
-        <div class="station-header">${feature.properties.nameClean}</div>
-        <div class="station-address">${feature.properties.addressClean}</div>
-    `;
+    const p = feature.properties;
+    let html = `<div class="station-header">${p.nameClean}</div>`;
+
+    if (p.isClosed) {
+        html += `<div style="color:#c62828; font-weight:bold; font-size:12px; margin-top:4px;">❌ Временно не работает</div>`;
+    }
+
+    if (p.gazpromUrl !== undefined) {
+        // Газпромовская заправка — структурированный формат
+        html += `<div class="station-info-row"><b>Адрес:</b> ${p.addressClean}</div>`;
+        if (p.scheduleClean) {
+            html += `<div class="station-info-row"><b>Режим работы:</b> ${p.scheduleClean}</div>`;
+        }
+        const amenityBadges = buildAmenitiesHtml(p.amenities || {});
+        if (amenityBadges) {
+            html += `<div class="station-info-row"><b>Удобства:</b><div class="amenities-row">${amenityBadges}</div></div>`;
+        }
+    } else {
+        // Обычная заправка — адрес, расписание, телефон
+        if (p.addressClean) {
+            html += `<div class="station-info-row"><b>Адрес:</b> ${p.addressClean}</div>`;
+        }
+        if (p.scheduleClean) {
+            html += `<div class="station-info-row"><b>Режим работы:</b> ${p.scheduleClean}</div>`;
+        }
+    }
 
     if (isRouteActive) {
         const alreadyAdded = selectedWaypoints.some(w => w.id == stId);

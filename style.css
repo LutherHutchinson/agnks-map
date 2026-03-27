@@ -256,6 +256,119 @@ input[type="range"] {
     user-select: none;
 }
 
+/* Фильтр по удобствам */
+.amenity-filter-toggle {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 12px;
+    margin-bottom: 0;
+    background: #f5f5f5;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-main);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.amenity-filter-toggle:hover {
+    background: var(--color-border);
+}
+
+#amenity-filter-panel {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: #fafafa;
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--border-radius-md);
+}
+
+.amenity-filter-note {
+    font-size: 11px;
+    color: var(--color-text-faint);
+    margin-bottom: 10px;
+    font-style: italic;
+}
+
+.amenity-category {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 10px 0 5px;
+}
+
+.amenity-category:first-of-type {
+    margin-top: 0;
+}
+
+.amenity-checkboxes {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+/* Прячем стандартный чекбокс — display:none чтобы обойти глобальный width:100% */
+.amenity-checkboxes input[type="checkbox"] {
+    display: none;
+}
+
+/* Лейбл как пилюля */
+.amenity-checkboxes label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border: 1.5px solid var(--color-border);
+    border-radius: 20px;
+    font-size: 12px;
+    color: var(--color-text-label);
+    background: #fff;
+    cursor: pointer;
+    user-select: none;
+    width: fit-content;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.amenity-checkboxes label:hover {
+    border-color: var(--color-accent-dark);
+    background: #fffde7;
+}
+
+/* Активное состояние */
+.amenity-checkboxes label:has(input[type="checkbox"]:checked) {
+    background: var(--color-accent);
+    border-color: var(--color-accent-dark);
+    color: var(--color-text-main);
+    font-weight: 600;
+}
+
+.reset-filters-btn {
+    display: block;
+    margin-top: 12px;
+    width: 100%;
+    padding: 7px;
+    background: #fff !important;
+    border: 1.5px solid var(--color-border) !important;
+    border-radius: var(--border-radius-md);
+    font-size: 12px;
+    font-weight: normal;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    margin-bottom: 0;
+}
+
+.reset-filters-btn:hover {
+    border-color: #f44336 !important;
+    color: #f44336;
+    background: #fff5f5 !important;
+}
+
 /* Балун заправки */
 .station-header {
     font-size: 15px;
@@ -268,6 +381,24 @@ input[type="range"] {
     font-size: 12px;
     color: var(--color-text-muted);
     line-height: 1.4;
+}
+
+/* Строки с подписями (для заправок Газпрома) */
+.station-info-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--color-text-muted);
+    line-height: 1.4;
+}
+
+.station-info-label {
+    font-weight: 700;
+    color: var(--color-text-main);
+    flex-shrink: 0;
 }
 
 /* Кнопка внутри балуна */
@@ -331,6 +462,29 @@ input[type="range"] {
     background: #ddd;
     color: #888;
     cursor: default;
+}
+
+/* Иконки удобств */
+.amenities-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-border-light);
+}
+
+.amenity-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 8px;
+    background: #f0f7ff;
+    border: 1px solid #b3d4f5;
+    border-radius: 12px;
+    font-size: 11px;
+    color: #1a5a8a;
+    white-space: nowrap;
 }
 
 /* Мобильная адаптация (Bottom Sheet) */
