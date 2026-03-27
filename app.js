@@ -260,6 +260,30 @@ function bindUIEvents() {
         document.querySelectorAll('[data-amenity]').forEach(cb => { cb.checked = false; });
         filterAndRenderStations();
     });
+
+    // === ДОБАВЛЕНО: Модальное окно инструкции ===
+    const guideBtn = document.getElementById('guide-btn');
+    const guideModal = document.getElementById('guide-modal');
+    const closeGuideBtn = document.getElementById('close-guide');
+
+    if (guideBtn && guideModal && closeGuideBtn) {
+        // Клик по кнопке — показать окно
+        guideBtn.addEventListener('click', () => {
+            guideModal.style.display = 'flex';
+        });
+
+        // Клик по крестику — скрыть окно
+        closeGuideBtn.addEventListener('click', () => {
+            guideModal.style.display = 'none';
+        });
+
+        // Закрытие по клику вне белого окна (по серому фону)
+        guideModal.addEventListener('click', (e) => {
+            if (e.target === guideModal) {
+                guideModal.style.display = 'none';
+            }
+        });
+    }
 }
 
 // Возвращает список выбранных фильтров по удобствам
