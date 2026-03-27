@@ -355,6 +355,7 @@ function buildTurfRouteLine(showAll, isRouteActive) {
 // Разметка балуна
 function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const singleNavLink = `https://yandex.ru/maps/?rtext=~${latS},${lonS}`;
+    const placeLink = `https://yandex.ru/maps/?text=${latS},${lonS}`;
 
     let html = `
         <div class="station-header">${feature.properties.nameClean}</div>
@@ -370,6 +371,8 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     } else {
         html += `<a href="${singleNavLink}" target="_blank" class="yandex-link-btn">Отправиться сюда</a>`;
     }
+
+    html += `<button class="yandex-link-btn" onclick="window.open('${placeLink}', '_blank')" style="margin-top: 10px; background-color: #f5f5f5; color: #333; border: 1px solid #ccc;">Посмотреть на Яндекс Картах</button>`;
 
     return html;
 }
