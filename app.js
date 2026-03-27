@@ -67,26 +67,84 @@ async function init() {
 async function loadStations() {
     setStatus('Загрузка базы станций…');
 
-    let data;
+    let gazpromData, allData;
     try {
-        const response = await fetch('stations.json');
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        data = await response.json();
+        const [resGazprom, resAll] = await Promise.all([
+            fetch('gazprom_stations.json'),
+            fetch('stations.json')
+        ]);
+
+        if (!resGazprom.ok) throw new Error(`HTTP Gazprom ${resGazprom.status}`);
+        if (!resAll.ok) throw new Error(`HTTP All ${resAll.status}`);
+
+        gazpromData = await resGazprom.json();
+        allData = await resAll.json();
     } catch (err) {
-        setStatus(`Ошибка загрузки stations.json: ${err.message}`);
+        setStatus(`Ошибка загрузки баз станций: ${err.message}`);
         return;
     }
 
-    data.forEach(function (item) {
+    const itemsGazprom = gazpromData.elements ? gazpromData.elements : gazpromData;
+    const tolerance = 0.001; // ~100 метров погрешности при совпадении координат
+
+    // Сначала парсим заправки Газпрома
+    itemsGazprom.forEach(function (item) {
+        if (item.gps) {
+            const parsed = parseGazpromStation(item);
+            if (parsed) allFeatures.push(parsed);
+        }
+    });
+
+    // Затем парсим общую базу, исключая дубликаты
+    allData.forEach(function (item) {
         if (item.type === 'Feature' && item.geometry && item.properties) {
-            allFeatures.push(parseStation(item));
+            const parsed = parseStation(item);
+            if (!parsed) return;
+
+            const [latNew, lonNew] = parsed.geometry.coordinates;
+            // Проверяем, нет ли уже газпромовской заправки с такими же координатами
+            const isDuplicate = allFeatures.some(existing => {
+                const [latE, lonE] = existing.geometry.coordinates;
+                return Math.abs(latE - latNew) < tolerance && Math.abs(lonE - lonNew) < tolerance;
+            });
+
+            if (!isDuplicate) {
+                allFeatures.push(parsed);
+            }
         }
     });
 
     setStatus('');
     filterAndRenderStations();
 
-    // Нормализация данных станции
+    // Парсинг "сырых" данных Газпрома
+    function parseGazpromStation(el) {
+        const coords = el.gps.split(',').map(s => parseFloat(s.trim()));
+        if (!coords || coords.length !== 2 || isNaN(coords[0]) || (coords[0] === 0 && coords[1] === 0)) return null;
+
+        const nameClean = stripHtml(el.name || 'АГНКС');
+        const workTimeStr = el.work_time ? `<br/>Время работы: ${el.work_time}` : '';
+        const addressClean = stripHtml(el.address || '') + workTimeStr;
+
+        return {
+            type: 'Feature',
+            id: el.id,
+            geometry: {
+                type: 'Point',
+                coordinates: coords // [lat, lon]
+            },
+            properties: {
+                nameClean,
+                addressClean,
+                clusterCaption: el.city ? `${el.city}, ${nameClean}` : nameClean,
+                hintContent: nameClean,
+                rawCoords: coords,
+                gazpromUrl: el.url
+            }
+        };
+    }
+
+    // Нормализация данных стандартной станции
     function parseStation(item) {
         const nameClean = stripHtml(item.properties.hintContent || 'АГНКС');
         let addressClean = stripHtml(item.properties.balloonContentBody || '');
@@ -98,7 +156,7 @@ async function loadStations() {
             id: item.id,
             geometry: {
                 type: 'Point',
-                coordinates: item.geometry.coordinates // [lat, lon] — формат Яндекса
+                coordinates: item.geometry.coordinates // [lat, lon]
             },
             properties: {
                 nameClean,
