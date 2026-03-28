@@ -603,6 +603,131 @@ input[type="range"] {
     margin-bottom: 8px;
 }
 
+
+/* === ДОБАВЛЕНО: Блок отзывов в балуне === */
+.balloon-comments-wrap {
+    margin-top: 15px;
+    padding-top: 10px;
+    border-top: 1px solid #eee;
+}
+
+.comments-header {
+    font-size: 13px;
+    font-weight: bold;
+    color: #555;
+    margin-bottom: 8px;
+}
+
+.comments-list {
+    max-height: 120px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+}
+
+.comment-item {
+    background: #fdfdfd;
+    border: 1px solid #f0f0f0;
+    border-left: 3px solid #ffcc00;
+    padding: 6px 10px;
+    border-radius: 4px;
+    margin-bottom: 6px;
+}
+
+.comment-text {
+    font-size: 13px;
+    color: #333;
+    line-height: 1.4;
+}
+
+.comment-meta {
+    font-size: 10px;
+    color: #888;
+    text-align: right;
+    margin-top: 3px;
+}
+
+.no-comments {
+    font-size: 12px;
+    color: #999;
+    font-style: italic;
+    padding: 5px 0;
+}
+
+/* Форма добавления отзыва */
+.add-comment-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.add-comment-form textarea {
+    flex: 1;
+    border: 1px solid #ddd;
+    border-radius: var(--border-radius-md);
+    padding: 8px;
+    font-size: 13px;
+    resize: none;
+    font-family: inherit;
+    transition: border-color var(--transition-fast);
+}
+
+.add-comment-form textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+}
+
+.comment-send-btn {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 10px 15px;
+
+    background: var(--color-accent) !important;
+    border: none !important;
+    border-radius: var(--border-radius-md);
+    box-shadow: var(--shadow-balloon-btn);
+
+    color: #000 !important;
+    font-weight: bold;
+    font-size: 13px;
+    font-family: inherit;
+    text-align: center;
+    text-decoration: none;
+
+    cursor: pointer;
+    transition: background 0.2s, transform 0.2s;
+}
+
+.comment-send-btn:hover {
+    background: var(--color-accent-dark) !important;
+    transform: translateY(-1px);
+}
+
+.comment-send-btn:active {
+    transform: translateY(0);
+}
+
+
+.comment-toggle-btn {
+    width: 100%;
+    background: #fff;
+    border: 1px dashed #ccc;
+    color: #555;
+    padding: 8px;
+    border-radius: var(--border-radius-md);
+    font-size: 13px;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: all 0.2s;
+}
+
+.comment-toggle-btn:hover {
+    border-color: var(--color-accent);
+    color: #000;
+    background: #fff8e1;
+}
+
 /* Мобильная адаптация (Bottom Sheet) */
 @media (max-width: 600px) {
     body {

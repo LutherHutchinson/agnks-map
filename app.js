@@ -42,6 +42,9 @@ let destName = '';
 // Остановки пользователя
 let selectedWaypoints = [];
 
+// Пользовательские отзывы
+let userComments = {};
+
 ymaps.ready(init);
 
 async function init() {
@@ -59,7 +62,12 @@ async function init() {
     objectManager.clusters.options.set('preset', 'islands#blueClusterIcons');
     myMap.geoObjects.add(objectManager);
 
+    // Сначала загружаем отзывы пользователей
+    await fetchComments();
+
+    // Затем загружаем базу заправок (она использует отзывы при сборке балунов)
     await loadStations();
+
     bindUIEvents();
 }
 
@@ -578,6 +586,16 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
         }
     }
 
+    // Секция отзывов (только список)
+    html += `
+        <div class="balloon-comments-wrap">
+            <div class="comments-header">💬 Отзывы и инфо:</div>
+            <div id="comments-list-${stId}" class="comments-list">
+                ${buildCommentsHtml(stId)}
+            </div>
+        </div>
+    `;
+
     if (isRouteActive) {
         const alreadyAdded = selectedWaypoints.some(w => w.id == stId);
 
@@ -589,6 +607,19 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     }
 
     html += `<button class="yandex-link-btn" onclick="window.open('${placeLink}', '_blank')" style="margin-top: 10px; background-color: #f5f5f5; color: #333; border: 1px solid #ccc;">Посмотреть на Яндекс Картах</button>`;
+
+    // Кнопка добавления отзыва в самом низу
+    html += `
+        <div id="comment-form-wrap-${stId}" style="display: none; margin-top: 10px;">
+            <div class="add-comment-form">
+                <textarea id="comment-input-${stId}" placeholder="Расскажите подробности о заправке (сломано, очереди, сервис...)" rows="3"></textarea>
+                <button onclick="onCommentSubmit('${stId}')" class="comment-send-btn">Отправить информацию</button>
+            </div>
+        </div>
+        <button id="comment-toggle-btn-${stId}" class="comment-toggle-btn" onclick="toggleCommentForm('${stId}')">
+            📝 Оставить заметку
+        </button>
+    `;
 
     return html;
 }
@@ -673,4 +704,91 @@ function useMyLocation(inputId) {
 
 function setStatus(text) {
     document.getElementById('status').innerText = text;
+}
+// --- РАБОТА С ОТЗЫВАМИ ---
+
+async function fetchComments() {
+    try {
+        const res = await fetch('/api/comments');
+        if (res.ok) {
+            userComments = await res.json();
+        }
+    } catch (e) {
+        console.error('Ошибка загрузки отзывов:', e);
+    }
+}
+
+function buildCommentsHtml(stationId) {
+    const comments = userComments[stationId] || [];
+    if (comments.length === 0) {
+        return '<div class="no-comments">Пока нет отзывов. Будьте первым!</div>';
+    }
+    // Копируем и разворачиваем, чтобы самые новые были сверху
+    return comments.slice().reverse().map(c => `
+        <div class="comment-item">
+            <div class="comment-text">${escapeHtml(c.text)}</div>
+            <div class="comment-meta">${c.date}</div>
+        </div>
+    `).join('');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function onCommentSubmit(stationId) {
+    const input = document.getElementById(`comment-input-${stationId}`);
+    const text = input.value.trim();
+    if (!text) return;
+
+    try {
+        const response = await fetch('/api/comments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stationId, text })
+        });
+
+        if (response.ok) {
+            input.value = '';
+            // Локально обновляем данные для мгновенного отображения
+            if (!userComments[stationId]) userComments[stationId] = [];
+
+            const now = new Date();
+            const dateStr = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+            userComments[stationId].push({ text, date: dateStr });
+
+            // Перерисовываем список отзывов
+            const list = document.getElementById(`comments-list-${stationId}`);
+            if (list) list.innerHTML = buildCommentsHtml(stationId);
+
+            // Скрываем форму обратно
+            toggleCommentForm(stationId);
+        } else {
+            alert('Не удалось отправить отзыв. Попробуйте позже.');
+        }
+    } catch (e) {
+        console.error('Ошибка отправки отзыва:', e);
+        alert('Ошибка сети.');
+    }
+}
+
+function toggleCommentForm(stationId) {
+    const formWrap = document.getElementById(`comment-form-wrap-${stationId}`);
+    const toggleBtn = document.getElementById(`comment-toggle-btn-${stationId}`);
+
+    if (formWrap.style.display === 'none') {
+        formWrap.style.display = 'block';
+        toggleBtn.style.display = 'none';
+        // Фокус на поле ввода
+        setTimeout(() => {
+            const input = document.getElementById(`comment-input-${stationId}`);
+            if (input) input.focus();
+        }, 100);
+    } else {
+        formWrap.style.display = 'none';
+        toggleBtn.style.display = 'block';
+    }
 }
