@@ -6,10 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>АГНКС Маршруты</title>
 
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=2">
 
     <!-- Конфигурация (ключи) -->
-    <script src="config.js"></script>
+    <script src="config.js?v=2"></script>
     <script>
         document.write('<script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=' + CONFIG.YANDEX_MAPS_API_KEY + '" type="text/javascript"><\/script>');
     </script>
@@ -52,6 +52,8 @@
             <a id="launch-nav" href="#" target="_blank" class="final-nav-btn" style="display: none;">
                 🚗 ПОЕХАЛИ (Навигатор)
             </a>
+            <button id="reset-route" class="reset-filters-btn reset-route-big" style="display: none;">✕ Сбросить
+                маршрут</button>
         </div>
 
         <!-- Фильтр видимости заправок -->
@@ -142,7 +144,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=2"></script>
+    <script src="app.js?v=3"></script>
 
 </body>
 

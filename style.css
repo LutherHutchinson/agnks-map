@@ -384,6 +384,13 @@ input[type="range"] {
     background: #fff5f5 !important;
 }
 
+.reset-route-big {
+    padding: 10px !important;
+    font-size: 14px !important;
+    margin-top: 10px !important;
+    font-weight: 500 !important;
+}
+
 /* Балун заправки */
 .station-header {
     font-size: 15px;
@@ -814,10 +821,6 @@ input[type="range"] {
     font-weight: bold;
     cursor: pointer;
     box-shadow: var(--shadow-btn);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 0;
     transition: transform 0.3s ease-in-out;
 }
 
@@ -840,7 +843,9 @@ input[type="range"] {
 
 @media (max-width: 600px) {
     .sidebar-toggle-btn {
-        display: block;
+        display: flex;
+        justify-content: center;
+        align-items: center;
     }
 
     #controls {
