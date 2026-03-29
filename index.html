@@ -31,13 +31,18 @@
         <h3>Планировщик АГНКС</h3>
 
         <!-- Ввод маршрута -->
-        <div class="input-wrapper">
-            <input type="text" id="route-from" placeholder="Откуда (например: Элиста)">
-            <button id="my-loc-from" class="my-loc-btn" title="Моё местоположение">📍</button>
-        </div>
-        <div class="input-wrapper">
-            <input type="text" id="route-to" placeholder="Куда (например: Краснодар)">
-            <button id="my-loc-to" class="my-loc-btn" title="Моё местоположение">📍</button>
+        <div class="route-inputs">
+            <div class="input-wrapper">
+                <input type="text" id="route-from" placeholder="Откуда (например: Элиста)">
+                <button id="my-loc-from" class="my-loc-btn" title="Моё местоположение">📍</button>
+            </div>
+
+            <button id="swap-locations" class="swap-btn" title="Поменять местами">⇅</button>
+
+            <div class="input-wrapper">
+                <input type="text" id="route-to" placeholder="Куда (например: Краснодар)">
+                <button id="my-loc-to" class="my-loc-btn" title="Моё местоположение">📍</button>
+            </div>
         </div>
         <button id="build-route">Проложить маршрут</button>
 
@@ -81,6 +86,7 @@
 
                 <div class="amenity-category">Время работы</div>
                 <div class="amenity-checkboxes">
+                    <label><input type="checkbox" data-amenity="is_open_now"> 🟢 Открыто сейчас</label>
                     <label><input type="checkbox" data-amenity="around_the_clock"> 🕐 Круглосуточно</label>
                 </div>
 
@@ -112,6 +118,31 @@
                 </div>
 
                 <button id="reset-amenity-filters" type="button" class="reset-filters-btn">✕ Сбросить фильтры</button>
+            </div>
+        </div>
+
+        <!-- Легенда меток с "реальными" иконками -->
+        <div class="legend-container">
+            <div class="legend-title">Легенда:</div>
+            <div class="legend-grid">
+                <div class="legend-item">
+                    <div class="marker-icon marker-always"></div> 24/7
+                </div>
+                <div class="legend-item">
+                    <div class="marker-icon marker-open"></div> Открыто
+                </div>
+                <div class="legend-item">
+                    <div class="marker-icon marker-closed"></div> Закрыто
+                </div>
+                <div class="legend-item">
+                    <div class="marker-icon marker-vremenno"></div> Не работает
+                </div>
+                <div class="legend-item">
+                    <div class="marker-icon marker-no-data"></div> Нет данных
+                </div>
+                <div class="legend-item">
+                    <div class="marker-icon marker-added"></div> В маршруте
+                </div>
             </div>
         </div>
 

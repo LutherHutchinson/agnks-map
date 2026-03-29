@@ -140,6 +140,39 @@ button {
     font-size: 14px;
 }
 
+.route-inputs {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.swap-btn {
+    position: absolute;
+    right: 44px;
+    top: 36px;
+    width: 28px !important;
+    height: 28px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    z-index: 10;
+    background: white !important;
+    border: 1px solid var(--color-border) !important;
+    border-radius: 50% !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-primary) !important;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+}
+
+.swap-btn:hover {
+    background: #f5f5f5 !important;
+    transform: scale(1.1);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+}
+
 input[type="text"]:focus {
     outline: none;
     border-color: var(--color-accent);
@@ -178,6 +211,31 @@ input[type="range"] {
 }
 
 /* Карточка остановки */
+/* Информация о маршруте */
+.route-total-info {
+    font-size: 14px;
+    margin-bottom: 12px;
+    padding: 10px;
+    background: var(--color-stop-bg);
+    border-radius: var(--border-radius-md);
+    border: 1px dashed var(--color-border);
+    text-align: center;
+    color: var(--color-text-main);
+}
+
+.route-stop-wrapper {
+    margin-bottom: 2px;
+}
+
+.route-segment-dist {
+    font-size: 11px;
+    color: var(--color-text-dim);
+    margin-left: 20px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
 .route-stop {
     display: flex;
     justify-content: space-between;
@@ -925,4 +983,88 @@ input[type="range"] {
         margin-bottom: 4px !important;
         padding: 4px 6px !important;
     }
+}
+
+/* --- ЛЕГЕНДА МЕТОК --- */
+/* --- ЛЕГЕНДА МЕТОК (Визуальные иконки) --- */
+.legend-container {
+    margin-top: 15px;
+    padding: 15px;
+    background: #fff;
+    border-radius: var(--border-radius-md);
+    border-top: 1px solid var(--color-border-light);
+    box-shadow: var(--shadow-sm);
+}
+
+.legend-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--color-text-main);
+    margin-bottom: 12px;
+}
+
+.legend-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 8px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    color: var(--color-text-muted);
+}
+
+/* Иконка в форме метки (pin) */
+.marker-icon {
+    width: 14px;
+    height: 14px;
+    position: relative;
+    border-radius: 50% 50% 0 50%;
+    transform: rotate(-135deg);
+    /* Поворот для формы капли наконечником вниз */
+    flex-shrink: 0;
+    box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
+    margin: 4px;
+}
+
+/* Белая точка внутри метки */
+.marker-icon::after {
+    content: '';
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: white;
+    border-radius: 50%;
+    top: 4px;
+    left: 4px;
+    transform: rotate(135deg);
+    /* Возвращаем точку в нормальное положение */
+}
+
+.marker-always {
+    background-color: #1b5e20;
+}
+
+.marker-open {
+    background-color: #2e7d32;
+}
+
+.marker-closed {
+    background-color: #757575;
+}
+
+.marker-vremenno {
+    background-color: #c62828;
+}
+
+.marker-no-data {
+    background-color: #1565c0;
+}
+
+.marker-added {
+    background-color: #ffeb3b;
+    border: 1px solid #fbc02d;
 }

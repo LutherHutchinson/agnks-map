@@ -14,7 +14,7 @@ const MAP_ZOOM = isMobile ? 1.5 : 4;
 
 // Иконки меток
 const ICON_STATION_DEFAULT = 'islands#blueIcon';
-const ICON_STATION_ADDED = 'islands#greenIcon';
+const ICON_STATION_ADDED = 'islands#yellowIcon';
 
 // Стиль маршрута
 const ROUTE_LINE_COLOR = '#1e98ff';
@@ -219,6 +219,9 @@ async function loadStations() {
                 addressClean: addressLines.join(', '),
                 scheduleClean: scheduleLines.join('; ') || null,
                 phoneClean: phoneLines.join('; ') || null,
+                amenities: {
+                    around_the_clock: /круглосуточно|24\/7/i.test(scheduleLines.join('; '))
+                },
                 clusterCaption: item.properties.clusterCaption,
                 hintContent: nameClean,
                 rawCoords: item.geometry.coordinates
@@ -257,6 +260,32 @@ function bindUIEvents() {
 
     document.getElementById('my-loc-from').addEventListener('click', () => useMyLocation('route-from'));
     document.getElementById('my-loc-to').addEventListener('click', () => useMyLocation('route-to'));
+
+    // Кнопка смены мест А и Б
+    document.getElementById('swap-locations').addEventListener('click', () => {
+        const fromInput = document.getElementById('route-from');
+        const toInput = document.getElementById('route-to');
+
+        // Меняем текст в инпутах
+        const tempVal = fromInput.value;
+        fromInput.value = toInput.value;
+        toInput.value = tempVal;
+
+        // Меняем глобальные переменные координат
+        const tempGeo = originGeo;
+        originGeo = destGeo;
+        destGeo = tempGeo;
+
+        // Меняем сохраненные названия
+        const tempName = originName;
+        originName = destName;
+        destName = tempName;
+
+        // Если оба пункта заданы — перестраиваем маршрут
+        if (originGeo && destGeo) {
+            buildRoute(originGeo, destGeo);
+        }
+    });
 
     // Фильтр по удобствам — кнопка раскрытия
     document.getElementById('amenity-toggle').addEventListener('click', function () {
@@ -531,17 +560,33 @@ function filterAndRenderStations() {
         const stId = feature.id;
         const isAdded = selectedWaypoints.some(w => w.id == stId);
 
+        // Определяем временной статус
+        const timeStatus = getStationStatus(feature);
+        feature.properties.timeStatus = timeStatus;
+
         feature.properties.balloonContentBody = buildBalloonHtml(feature, latS, lonS, stId, isRouteActive);
-        const isClosed = feature.properties.isClosed;
-        feature.options = {
-            preset: isAdded ? ICON_STATION_ADDED
-                : isClosed ? 'islands#redDotIcon'
-                    : ICON_STATION_DEFAULT
-        };
+
+        // Иконки в зависимости от статуса
+        let preset = ICON_STATION_DEFAULT;
+        if (isAdded) {
+            preset = ICON_STATION_ADDED;
+        } else if (timeStatus === 'vremenno') {
+            preset = 'islands#redDotIcon';
+        } else if (timeStatus === 'closed') {
+            preset = 'islands#grayDotIcon';
+        } else if (timeStatus === 'open') {
+            preset = 'islands#greenDotIcon';
+        } else if (timeStatus === 'always') {
+            preset = 'islands#darkGreenDotIcon';
+        } else if (timeStatus === 'no_data') {
+            preset = 'islands#blueDotIcon';
+        }
+
+        feature.options = { preset };
 
         if (showAll || !routeLine) {
             // Только фильтр по удобствам
-            return amenityFilter.length === 0 || passesAmenityFilter(feature, amenityFilter);
+            return amenityFilter.length === 0 || passesAmenityFilter(feature, amenityFilter, timeStatus);
         }
 
         let distanceKm = Infinity;
@@ -556,7 +601,7 @@ function filterAndRenderStations() {
         }
 
         return distanceKm <= maxDistKm
-            && (amenityFilter.length === 0 || passesAmenityFilter(feature, amenityFilter));
+            && (amenityFilter.length === 0 || passesAmenityFilter(feature, amenityFilter, timeStatus));
     });
 
     objectManager.add(filtered);
@@ -569,10 +614,15 @@ function filterAndRenderStations() {
 }
 
 // Проверяет, соответствует ли заправка фильтрам по удобствам
-function passesAmenityFilter(feature, amenities) {
+function passesAmenityFilter(feature, amenities, timeStatus) {
     const am = feature.properties.amenities;
     if (!am) return false; // нет данных об удобствах — не подходит
-    return amenities.every(key => am[key]);
+    return amenities.every(key => {
+        if (key === 'is_open_now') {
+            return timeStatus === 'open' || timeStatus === 'always';
+        }
+        return am[key];
+    });
 }
 
 // Создание Turf-линии маршрута
@@ -600,6 +650,87 @@ function buildTurfRouteLine(showAll, isRouteActive) {
             `<span style="color: red;">Ошибка Turf: ${e.message}</span>`;
         return null;
     }
+}
+
+/** Оценка часового пояса (UTC offset) по долготе для России */
+function getRussiaTimeOffset(lon) {
+    if (lon < 22.5) return 2;   // Калининград (+2)
+    if (lon < 45.0) return 3;   // Москва, СПб (+3)
+    if (lon < 53.0) return 4;   // Самара, Ижевск (+4)
+    if (lon < 69.5) return 5;   // Екатеринбург, Пермь (+5)
+    if (lon < 82.5) return 6;   // Омск (+6)
+    if (lon < 97.5) return 7;   // Новосибирск, Красноярск (+7)
+    if (lon < 112.5) return 8;  // Иркутск (+8)
+    if (lon < 127.5) return 9;  // Якутск (+9)
+    if (lon < 140.0) return 10; // Владивосток (+10)
+    if (lon < 155.0) return 11; // Магадан, Сахалин (+11)
+    return 12;                  // Камчатка (+12)
+}
+
+/** Определение текущего рабочего статуса заправки */
+function getStationStatus(feature) {
+    const p = feature.properties;
+    if (p.isClosed) return 'vremenno';
+
+    // Если явно указано "круглосуточно" в удобствах Газпрома
+    if (p.amenities && p.amenities.around_the_clock) return 'always';
+
+    const schedule = p.scheduleClean ? p.scheduleClean.toLowerCase() : '';
+    if (!schedule) return 'no_data';
+
+    if (schedule.includes('круглосуточно')) return 'always';
+    if (schedule.includes('временно не работает')) return 'vremenno';
+
+    // Определяем локальное время на заправке
+    const lon = feature.geometry.coordinates[1];
+    const offset = getRussiaTimeOffset(lon);
+
+    // Используем UTC время напрямую (избегаем путаницы с локальной зоной браузера)
+    const now = new Date();
+    const utcMins = (now.getUTCHours() * 60) + now.getUTCMinutes();
+    const absMins = (utcMins + (offset * 60) + 1440) % 1440;
+
+    // Сначала ищем ВСЕ временные интервалы в расписании
+    const allIntervals = Array.from(schedule.matchAll(/(\d{1,2})[:.](\d{2})\s*(?:-|по|до)\s*(\d{1,2})[:.](\d{2})/g));
+
+    if (schedule.includes('круглосуточно') || schedule.includes('24/7')) {
+        // Для круглосуточных заправок любой найденный интервал считается техническим перерывом
+        for (const m of allIntervals) {
+            const bStart = parseInt(m[1]) * 60 + parseInt(m[2]);
+            const bEnd = parseInt(m[3]) * 60 + parseInt(m[4]);
+            if (absMins >= bStart && absMins <= bEnd) return 'closed';
+        }
+        return 'always';
+    }
+
+    if (allIntervals.length > 0) {
+        // Первый найденный интервал считаем основным рабочим временем
+        const main = allIntervals[0];
+        const start = parseInt(main[1]) * 60 + parseInt(main[2]);
+        const end = parseInt(main[3]) * 60 + parseInt(main[4]);
+
+        let isOpen = false;
+        if (end > start) {
+            isOpen = (absMins >= start && absMins < end);
+        } else {
+            // Обработка перехода через полночь (например, 08:00 - 02:00)
+            isOpen = (absMins >= start || absMins < end);
+        }
+
+        if (isOpen) {
+            // Если текущее время в основном интервале, проверяем дополнительные интервалы (перерывы)
+            for (let i = 1; i < allIntervals.length; i++) {
+                const m = allIntervals[i];
+                const bStart = parseInt(m[1]) * 60 + parseInt(m[2]);
+                const bEnd = parseInt(m[3]) * 60 + parseInt(m[4]);
+                if (absMins >= bStart && absMins <= bEnd) return 'closed';
+            }
+            return 'open';
+        }
+        return 'closed';
+    }
+
+    return 'no_data';
 }
 
 // Иконки удобств для заправок Газпрома
@@ -634,9 +765,15 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const p = feature.properties;
     let html = `<div class="station-header">${p.nameClean}</div>`;
 
-    if (p.isClosed) {
-        html += `<div style="color:#c62828; font-weight:bold; font-size:12px; margin-top:4px;">❌ Временно не работает</div>`;
-    }
+    const statusMap = {
+        'vremenno': { text: 'Временно не работает', color: '#c62828', icon: '❌' },
+        'closed': { text: 'Закрыто сейчас', color: '#757575', icon: '🕒' },
+        'open': { text: 'Открыто сейчас', color: '#2e7d32', icon: '🟢' },
+        'always': { text: 'Круглосуточно', color: '#1b5e20', icon: '♾️' },
+        'no_data': { text: 'Нет данных о режиме работы', color: '#1565c0', icon: '❓' }
+    };
+    const s = statusMap[p.timeStatus || 'no_data'];
+    html += `<div style="color:${s.color}; font-weight:bold; font-size:12px; margin-top:4px;">${s.icon} ${s.text}</div>`;
 
     if (p.gazpromUrl !== undefined) {
         // Газпромовская заправка — структурированный формат
