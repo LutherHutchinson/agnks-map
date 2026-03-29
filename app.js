@@ -68,6 +68,10 @@ async function init() {
     // Затем загружаем базу заправок (она использует отзывы при сборке балунов)
     await loadStations();
 
+    // Подсказки при вводе адресов (Кастомная реализация через наш прокси)
+    initCustomSuggest('route-from');
+    initCustomSuggest('route-to');
+
     bindUIEvents();
 }
 
@@ -817,5 +821,94 @@ function toggleCommentForm(stationId) {
         formWrap.style.display = 'none';
         toggleBtn.style.display = 'block';
     }
+}
+
+/** Кастомные подсказки через наш серверный прокси */
+function initCustomSuggest(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    // Создаем контейнер для подсказок
+    let container = input.parentNode.querySelector('.custom-suggest-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'custom-suggest-container';
+        container.style.display = 'none';
+        input.parentNode.appendChild(container);
+    }
+
+    let timeout;
+
+    input.addEventListener('input', () => {
+        clearTimeout(timeout);
+        const text = input.value.trim();
+        if (text.length < 2) {
+            container.style.display = 'none';
+            return;
+        }
+
+        timeout = setTimeout(() => {
+            fetchSuggestions(text, (items) => {
+                renderSuggestions(items, input, container);
+            });
+        }, 300);
+    });
+
+    // Скрытие при потере фокуса
+    document.addEventListener('click', (e) => {
+        if (e.target !== input && !container.contains(e.target)) {
+            container.style.display = 'none';
+        }
+    });
+}
+
+function fetchSuggestions(text, callback) {
+    const url = `/api/suggest?text=${encodeURIComponent(text)}`;
+
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data && data.results) {
+                callback(data.results);
+            }
+        })
+        .catch(error => console.error('Error fetching suggestions:', error));
+}
+
+function renderSuggestions(items, input, container) {
+    container.innerHTML = '';
+    if (!items || items.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+
+    items.slice(0, 5).forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'custom-suggest-item';
+
+        const title = item.title.text;
+        const subtitle = item.subtitle ? item.subtitle.text : '';
+
+        div.innerHTML = `
+            <span class="title">${title}</span>
+            ${subtitle ? `<span class="subtitle">${subtitle}</span>` : ''}
+        `;
+
+        div.addEventListener('click', () => {
+            input.value = title;
+            container.style.display = 'none';
+            input.dispatchEvent(new Event('input'));
+        });
+
+        container.append(div);
+    });
+
+    const rect = input.getBoundingClientRect();
+    const parentRect = input.parentNode.getBoundingClientRect();
+    container.style.top = (rect.bottom - parentRect.top) + 'px';
+    container.style.left = (rect.left - parentRect.left) + 'px';
+    container.style.width = rect.width + 'px';
+
+    container.style.display = 'block';
 }
 

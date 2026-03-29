@@ -27,7 +27,8 @@ jobs:
       - name: Create config.js
         run: |
           echo "const CONFIG = {" > config.js
-          echo "    YANDEX_MAPS_API_KEY: '${{ secrets.YANDEX_API_KEY }}'" >> config.js
+          echo "    YANDEX_MAPS_API_KEY: '${{ secrets.YANDEX_API_KEY }}'," >> config.js
+          echo "    YANDEX_SUGGEST_API_KEY: '${{ secrets.YANDEX_SUGGEST_API_KEY }}'" >> config.js
           echo "};" >> config.js
 
       # 3. Загружаем файлы как артефакт Pages

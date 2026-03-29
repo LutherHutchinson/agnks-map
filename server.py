@@ -93,13 +93,55 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
         
         return new_comments
 
+    def get_suggest_key(self):
+        """Пытаемся достать ключ из config.js или переменных окружения"""
+        try:
+            if os.path.exists('config.js'):
+                with open('config.js', 'r', encoding='utf-8') as f:
+                    import re
+                    content = f.read()
+                    match = re.search(r"YANDEX_SUGGEST_API_KEY:\s*'([^']+)'", content)
+                    if match:
+                        return match.group(1)
+        except:
+            pass
+        return os.environ.get('YANDEX_SUGGEST_API_KEY', '')
+
     def do_GET(self):
-        if self.path == '/api/comments':
+        parsed_path = urlparse(self.path)
+        if parsed_path.path == '/api/comments':
             comments = self.get_comments()
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps(comments).encode('utf-8'))
+        elif parsed_path.path == '/api/suggest':
+            query = parse_qs(parsed_path.query)
+            text = query.get('text', [''])[0]
+            
+            if not text:
+                self.send_error(400, "Missing text parameter")
+                return
+
+            apikey = self.get_suggest_key()
+            if not apikey:
+                self.send_error(500, "Suggest API key not configured")
+                return
+
+            # Проксируем запрос к Яндексу
+            import urllib.request
+            url = f"https://suggest-maps.yandex.ru/v1/suggest?apikey={apikey}&text={urllib.parse.quote(text)}&print_address=1"
+            
+            try:
+                with urllib.request.urlopen(url) as response:
+                    data = response.read()
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(data)
+            except Exception as e:
+                self.send_error(500, str(e))
         else:
             # Default to static file serving
             super().do_GET()

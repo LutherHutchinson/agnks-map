@@ -762,3 +762,46 @@ input[type="range"] {
         overflow-y: auto;
     }
 }
+
+/* Кастомные подсказки (GeoSuggest) */
+.custom-suggest-container {
+    position: absolute;
+    background: white;
+    border: 1px solid #ddd;
+    border-top: none;
+    z-index: 10002;
+    max-height: 200px;
+    overflow-y: auto;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    border-radius: 0 0 8px 8px;
+    width: calc(100% - 32px);
+    /* С учетом паддингов обертки */
+}
+
+.custom-suggest-item {
+    padding: 10px 15px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #333;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.2s;
+}
+
+.custom-suggest-item:last-child {
+    border-bottom: none;
+}
+
+.custom-suggest-item:hover {
+    background: #fffde7;
+}
+
+.custom-suggest-item .title {
+    font-weight: 500;
+    display: block;
+}
+
+.custom-suggest-item .subtitle {
+    font-size: 12px;
+    color: #777;
+    display: block;
+}
