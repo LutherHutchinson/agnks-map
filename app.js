@@ -913,7 +913,20 @@ function initCustomSuggest(inputId) {
 }
 
 function fetchSuggestions(text, callback) {
-    const url = `/api/suggest?text=${encodeURIComponent(text)}`;
+    // Локально используем прокси-сервер, на хостинге — напрямую к Яндексу
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+    let url;
+    if (isLocal) {
+        url = `/api/suggest?text=${encodeURIComponent(text)}`;
+    } else {
+        const apiKey = (typeof CONFIG !== 'undefined' && CONFIG.YANDEX_SUGGEST_API_KEY) || '';
+        if (!apiKey) {
+            console.warn('YANDEX_SUGGEST_API_KEY не задан в config.js');
+            return;
+        }
+        url = `https://suggest-maps.yandex.ru/v1/suggest?apikey=${apiKey}&text=${encodeURIComponent(text)}&print_address=1&lang=ru`;
+    }
 
     fetch(url)
         .then(response => response.json())
