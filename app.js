@@ -351,8 +351,7 @@ function onBuildRouteClick() {
 
     }).catch(function (error) {
         console.error('Ошибка геокодирования:', error);
-        console.error('Текущий CONFIG:', typeof CONFIG !== 'undefined' ? CONFIG : 'CONFIG не загружен');
-        setStatus('Ошибка геокодирования: ' + (error.message || error) + '. Проверьте консоль (F12).');
+        setStatus('Ошибка геокодирования. Возможно, не указан или неверен API-ключ Яндекса.');
     });
 }
 
