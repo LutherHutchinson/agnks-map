@@ -51,7 +51,10 @@ async function init() {
     myMap = new ymaps.Map('map', {
         center: MAP_CENTER,
         zoom: MAP_ZOOM,
-        controls: ['zoomControl', 'fullscreenControl']
+        controls: isMobile ? [] : ['zoomControl', 'fullscreenControl']
+    }, {
+        balloonAutoPan: true,
+        balloonAutoPanMargin: 20
     });
 
     objectManager = new ymaps.ObjectManager({
@@ -68,10 +71,11 @@ async function init() {
     // Затем загружаем базу заправок (она использует отзывы при сборке балунов)
     await loadStations();
 
-    // Подсказки при вводе адресов (Кастомная реализация через наш прокси)
+    // Подсказки при вводе адресов
     initCustomSuggest('route-from');
     initCustomSuggest('route-to');
 
+    initBottomSheetResize();
     bindUIEvents();
 }
 
@@ -300,6 +304,36 @@ function bindUIEvents() {
             }
         });
     }
+
+    // === Sidebar Mobile Toggle ===
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    const controls = document.getElementById('controls');
+
+    function toggleSidebar() {
+        const isOpen = controls.classList.contains('sidebar-open');
+        if (isOpen) {
+            controls.classList.remove('sidebar-open');
+            sidebarToggle.classList.remove('sidebar-open');
+            sidebarOverlay.classList.remove('active');
+        } else {
+            controls.classList.add('sidebar-open');
+            sidebarToggle.classList.add('sidebar-open');
+            sidebarOverlay.classList.add('active');
+        }
+    }
+
+    if (sidebarToggle && sidebarOverlay) {
+        sidebarToggle.addEventListener('click', toggleSidebar);
+        sidebarOverlay.addEventListener('click', toggleSidebar);
+    }
+
+    // Сохраняем ссылки для доступа из других функций
+    window.closeSidebar = () => {
+        controls.classList.remove('sidebar-open');
+        sidebarToggle.classList.remove('sidebar-open');
+        sidebarOverlay.classList.remove('active');
+    };
 }
 
 // Возвращает список выбранных фильтров по удобствам
@@ -346,6 +380,10 @@ function onBuildRouteClick() {
         // Включаем фильтр по расстоянию от трассы
         document.getElementById('show-all').checked = false;
         document.getElementById('distance-slider-group').style.display = 'block';
+
+        if (window.innerWidth <= 600 && window.closeSidebar) {
+            window.closeSidebar();
+        }
 
         requestRouteAndRedraw();
 
@@ -403,7 +441,7 @@ function requestRouteAndRedraw() {
             baseRouteGeoJsonCoords = routeGeoJsonCoords;
             myMap.setBounds(routeObj.geometry.getBounds(), {
                 checkZoomRange: true,
-                zoomMargin: 30
+                zoomMargin: isMobile ? [10, 10, 40, 10] : 30
             });
         }
 
@@ -711,7 +749,14 @@ function useMyLocation(inputId) {
 }
 
 function setStatus(text) {
-    document.getElementById('status').innerText = text;
+    const statusEl = document.getElementById('status');
+    statusEl.innerText = text;
+
+    // На мобильных прокручиваем к статусу, если он изменился на важный
+    if (isMobile && text && text.length > 5) {
+        const controls = document.getElementById('controls');
+        if (controls) controls.scrollTo({ top: 0, behavior: 'smooth' });
+    }
 }
 
 async function loadGuide() {
@@ -966,6 +1011,9 @@ function renderSuggestions(items, input, container) {
             const btn = input.parentNode.querySelector('.my-loc-btn');
             if (btn) btn.classList.remove('btn-with-suggestions');
 
+            // На мобильных убираем фокус (скрываем клавиатуру) после выбора
+            if (isMobile) input.blur();
+
             // Мы НЕ диспатчим событие 'input', чтобы не спровоцировать 
             // повторный поиск подсказок для этого же текста.
         });
@@ -987,5 +1035,62 @@ function renderSuggestions(items, input, container) {
     container.style.width = input.offsetWidth + 'px';
 
     container.style.display = 'block';
+}
+
+/** Регулировка высоты нижней панели (Bottom Sheet) перетаскиванием */
+function initBottomSheetResize() {
+    const controls = document.getElementById('controls');
+    const handle = document.getElementById('bottom-sheet-handle');
+    if (!controls || !handle || !isMobile) return;
+
+    let isDragging = false;
+    let startY = 0;
+    let startHeight = 0;
+
+    // Загружаем сохраненную высоту
+    const savedHeight = localStorage.getItem('bottomSheetHeight');
+    if (savedHeight) {
+        controls.style.height = savedHeight;
+    }
+
+    const onStart = (e) => {
+        isDragging = true;
+        startY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+        startHeight = controls.offsetHeight;
+        document.body.style.userSelect = 'none'; // Запрет выделения при таще
+    };
+
+    const onMove = (e) => {
+        if (!isDragging) return;
+        const currentY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+        const deltaY = startY - currentY;
+        const newHeight = startHeight + deltaY;
+
+        // Ограничения (от 48px до 90% экрана)
+        const minH = 48;
+        const maxH = window.innerHeight * 0.9;
+
+        if (newHeight >= minH && newHeight <= maxH) {
+            controls.style.height = `${newHeight}px`;
+        }
+    };
+
+    const onEnd = () => {
+        if (isDragging) {
+            isDragging = false;
+            document.body.style.userSelect = '';
+            // Сохраняем результат
+            localStorage.setItem('bottomSheetHeight', controls.style.height);
+        }
+    };
+
+    handle.addEventListener('mousedown', onStart);
+    handle.addEventListener('touchstart', onStart, { passive: false });
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('touchmove', onMove, { passive: false });
+
+    window.addEventListener('mouseup', onEnd);
+    window.addEventListener('touchend', onEnd);
 }
 
