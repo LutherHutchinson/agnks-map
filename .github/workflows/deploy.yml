@@ -31,6 +31,13 @@ jobs:
           echo "    YANDEX_SUGGEST_API_KEY: '${{ secrets.YANDEX_SUGGEST_API_KEY }}'" >> config.js
           echo "};" >> config.js
 
+      # 2b. Диагностика — проверяем, что config.js создан (ключи скрыты)
+      - name: Verify config.js (debug)
+        run: |
+          echo "--- config.js contents ---"
+          cat config.js
+          echo "--------------------------"
+
       # 3. Загружаем файлы как артефакт Pages
       - name: Setup Pages
         uses: actions/configure-pages@v5
