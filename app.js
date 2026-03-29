@@ -574,7 +574,7 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
         }
         const amenityBadges = buildAmenitiesHtml(p.amenities || {});
         if (amenityBadges) {
-            html += `<div class="station-info-row"><b>Удобства:</b><div class="amenities-row">${amenityBadges}</div></div>`;
+            html += `<div class="station-info-row"><b>Удобства:</b></div><div class="amenities-row">${amenityBadges}</div>`;
         }
     } else {
         // Обычная заправка — адрес, расписание, телефон
@@ -792,3 +792,4 @@ function toggleCommentForm(stationId) {
         toggleBtn.style.display = 'block';
     }
 }
+

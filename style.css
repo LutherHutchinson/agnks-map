@@ -469,9 +469,10 @@ input[type="range"] {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    margin-top: 12px;
-    padding-top: 10px;
+    margin-top: 8px;
+    padding-top: 8px;
     border-top: 1px solid var(--color-border-light);
+    width: 100%;
 }
 
 .amenity-badge {
@@ -479,11 +480,11 @@ input[type="range"] {
     align-items: center;
     gap: 3px;
     padding: 3px 8px;
-    background: #f0f7ff;
-    border: 1px solid #b3d4f5;
+    background: #fff8e1;
+    border: 1px solid #ffcc00;
     border-radius: 12px;
     font-size: 11px;
-    color: #1a5a8a;
+    color: #ff9d00;
     white-space: nowrap;
 }
 
@@ -491,14 +492,14 @@ input[type="range"] {
 /* === ДОБАВЛЕНО: Кнопка Инструкции === */
 .guide-btn {
     margin-top: 10px;
-    background-color: #e3f2fd !important;
-    color: #1565c0 !important;
-    border: 1px solid #90caf9 !important;
+    background-color: #fff8e1 !important;
+    color: #ff9d00 !important;
+    border: 1px solid #ffcc00 !important;
     font-weight: 600;
 }
 
 .guide-btn:hover {
-    background-color: #bbdefb !important;
+    background-color: #fff8e1 !important;
 }
 
 /* === ДОБАВЛЕНО: Модальное окно === */
@@ -726,6 +727,11 @@ input[type="range"] {
     border-color: var(--color-accent);
     color: #000;
     background: #fff8e1;
+}
+
+/* Панель подсказок Яндекса (SuggestView) */
+[class*="suggest-view"] {
+    z-index: 10001 !important;
 }
 
 /* Мобильная адаптация (Bottom Sheet) */

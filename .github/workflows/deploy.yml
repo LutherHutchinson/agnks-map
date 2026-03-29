@@ -23,10 +23,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Подставляем API-ключ из секрета репозитория
-      - name: Inject Yandex Maps API key
+      # 2. Создаем config.js из секретов репозитория
+      - name: Create config.js
         run: |
-          sed -i "s|__YANDEX_KEY__|${{ secrets.YANDEX_API_KEY }}|g" index.html
+          echo "const CONFIG = {" > config.js
+          echo "    YANDEX_MAPS_API_KEY: '${{ secrets.YANDEX_API_KEY }}'" >> config.js
+          echo "};" >> config.js
 
       # 3. Загружаем файлы как артефакт Pages
       - name: Setup Pages

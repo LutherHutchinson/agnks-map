@@ -8,9 +8,11 @@
 
     <link rel="stylesheet" href="style.css">
 
-    <!-- Яндекс Карты API -->
-    <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=a5252d11-1c02-407a-9a11-cdcea2a45c23"
-        type="text/javascript"></script>
+    <!-- Конфигурация (ключи) -->
+    <script src="config.js"></script>
+    <script>
+        document.write('<script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=' + CONFIG.YANDEX_MAPS_API_KEY + '" type="text/javascript"><\/script>');
+    </script>
 
     <!-- Turf.js -->
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
