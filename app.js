@@ -273,11 +273,15 @@ function bindUIEvents() {
     const guideBtn = document.getElementById('guide-btn');
     const guideModal = document.getElementById('guide-modal');
     const closeGuideBtn = document.getElementById('close-guide');
+    const guideList = document.getElementById('guide-list');
 
     if (guideBtn && guideModal && closeGuideBtn) {
         // Клик по кнопке — показать окно
         guideBtn.addEventListener('click', () => {
             guideModal.style.display = 'flex';
+            if (guideList && guideList.children.length === 0) {
+                loadGuide();
+            }
         });
 
         // Клик по крестику — скрыть окно
@@ -705,6 +709,28 @@ function useMyLocation(inputId) {
 function setStatus(text) {
     document.getElementById('status').innerText = text;
 }
+
+async function loadGuide() {
+    try {
+        const res = await fetch('guide.md');
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+        const text = await res.text();
+
+        const listEl = document.getElementById('guide-list');
+        if (listEl) {
+            listEl.innerHTML = '';
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            lines.forEach(line => {
+                const li = document.createElement('li');
+                li.innerHTML = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                listEl.appendChild(li);
+            });
+        }
+    } catch (err) {
+        console.error('Ошибка загрузки guide.md:', err);
+    }
+}
+
 // --- РАБОТА С ОТЗЫВАМИ ---
 
 async function fetchComments() {
