@@ -844,6 +844,9 @@ function initCustomSuggest(inputId) {
         const text = input.value.trim();
         if (text.length < 2) {
             container.style.display = 'none';
+            input.classList.remove('input-with-suggestions');
+            const btn = input.parentNode.querySelector('.my-loc-btn');
+            if (btn) btn.classList.remove('btn-with-suggestions');
             return;
         }
 
@@ -854,10 +857,57 @@ function initCustomSuggest(inputId) {
         }, 300);
     });
 
+    let selectedIndex = -1;
+
+    function updateHighlight(items) {
+        items.forEach((item, i) => {
+            item.classList.toggle('custom-suggest-item--active', i === selectedIndex);
+            if (i === selectedIndex) item.scrollIntoView({ block: 'nearest' });
+        });
+    }
+
+    // Скрытие при нажатии Enter и навигация стрелками
+    input.addEventListener('keydown', (e) => {
+        const items = Array.from(container.querySelectorAll('.custom-suggest-item'));
+        const isOpen = container.style.display !== 'none';
+
+        if (!isOpen) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+            updateHighlight(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, -1);
+            updateHighlight(items);
+        } else if (e.key === 'Enter') {
+            if (selectedIndex >= 0 && items[selectedIndex]) {
+                items[selectedIndex].click(); // вставляет текст и закрывает
+            } else {
+                // просто закрываем без выбора подсказки
+                container.style.display = 'none';
+                input.classList.remove('input-with-suggestions');
+                const btn = input.parentNode.querySelector('.my-loc-btn');
+                if (btn) btn.classList.remove('btn-with-suggestions');
+            }
+            selectedIndex = -1;
+        } else if (e.key === 'Escape') {
+            container.style.display = 'none';
+            input.classList.remove('input-with-suggestions');
+            const btn = input.parentNode.querySelector('.my-loc-btn');
+            if (btn) btn.classList.remove('btn-with-suggestions');
+            selectedIndex = -1;
+        }
+    });
+
     // Скрытие при потере фокуса
     document.addEventListener('click', (e) => {
         if (e.target !== input && !container.contains(e.target)) {
             container.style.display = 'none';
+            input.classList.remove('input-with-suggestions');
+            const btn = input.parentNode.querySelector('.my-loc-btn');
+            if (btn) btn.classList.remove('btn-with-suggestions');
         }
     });
 }
@@ -897,7 +947,14 @@ function renderSuggestions(items, input, container) {
         div.addEventListener('click', () => {
             input.value = title;
             container.style.display = 'none';
-            input.dispatchEvent(new Event('input'));
+
+            // Убираем эффекты "выпадения"
+            input.classList.remove('input-with-suggestions');
+            const btn = input.parentNode.querySelector('.my-loc-btn');
+            if (btn) btn.classList.remove('btn-with-suggestions');
+
+            // Мы НЕ диспатчим событие 'input', чтобы не спровоцировать 
+            // повторный поиск подсказок для этого же текста.
         });
 
         container.append(div);
@@ -905,9 +962,16 @@ function renderSuggestions(items, input, container) {
 
     const rect = input.getBoundingClientRect();
     const parentRect = input.parentNode.getBoundingClientRect();
-    container.style.top = (rect.bottom - parentRect.top) + 'px';
-    container.style.left = (rect.left - parentRect.left) + 'px';
-    container.style.width = rect.width + 'px';
+
+    // Добавляем классы для эффекта "выпадения"
+    input.classList.add('input-with-suggestions');
+    const btn = input.parentNode.querySelector('.my-loc-btn');
+    if (btn) btn.classList.add('btn-with-suggestions');
+
+    // Позиционируем относительно .input-wrapper (который position: relative)
+    container.style.top = (input.offsetTop + input.offsetHeight) + 'px';
+    container.style.left = input.offsetLeft + 'px';
+    container.style.width = input.offsetWidth + 'px';
 
     container.style.display = 'block';
 }
