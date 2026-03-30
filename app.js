@@ -205,7 +205,7 @@ async function loadStations() {
             .filter(Boolean);
 
         const phoneRegex = /(\+7|8\s*[\(\-]?\d{3}|\бтел\b|факс)/i;
-        const scheduleRegex = /\d{1,2}[:.-]\d{2}|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв/iu;
+        const scheduleRegex = /\d{1,2}[:.\-\s]\d{2}|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв/iu;
 
         const addressLines = [], scheduleLines = [], phoneLines = [];
 
@@ -669,19 +669,74 @@ function buildTurfRouteLine(showAll, isRouteActive) {
     }
 }
 
-/** Оценка часового пояса (UTC offset) по долготе для России */
+/** Определение оффсета по названию региона (из данных Газпрома) */
+function getOffsetByRegion(regionName) {
+    if (!regionName) return null;
+    const r = regionName.toLowerCase();
+
+    // UTC+2
+    if (r.includes('калининград')) return 2;
+
+    // UTC+4
+    if (r.includes('астрахан') || r.includes('самар') || r.includes('саратов') ||
+        r.includes('удмурт') || r.includes('ульянов')) return 4;
+
+    // UTC+5
+    if (r.includes('башкортостан') || r.includes('курган') || r.includes('оренбург') ||
+        r.includes('перм') || r.includes('свердлов') || r.includes('тюмен') ||
+        r.includes('ханты') || r.includes('челябин') || r.includes('ямало')) return 5;
+
+    // UTC+6
+    if (r.includes('омск')) return 6;
+
+    // UTC+7
+    if (r.includes('алтай') || r.includes('кемеров') || r.includes('краснояр') ||
+        r.includes('новосибирск') || r.includes('томск') || r.includes('тыва') || r.includes('хакас')) return 7;
+
+    // UTC+8
+    if (r.includes('бурят') || r.includes('иркут')) return 8;
+
+    // UTC+9
+    if (r.includes('амурск') || r.includes('забайкаль')) return 9;
+
+    // UTC+10
+    if (r.includes('еврейск') || r.includes('приморск') || r.includes('хабаровск')) return 10;
+
+    // UTC+11
+    if (r.includes('магадан') || r.includes('сахалин')) return 11;
+
+    // UTC+12
+    if (r.includes('камчат') || r.includes('чукот')) return 12;
+
+    // Якутия (3 пояса, оставляем догадку по долготе дальше или берем средний +9)
+    if (r.includes('якутия') || r.includes('саха')) return null;
+
+    // По умолчанию для европейской части (если не попало в спец. списки)
+    const mskZones = ['москв', 'петербург', 'адыге', 'архангельск', 'белгород', 'брянск', 'владимир',
+        'волгоград', 'вологод', 'воронеж', 'дагестан', 'иванов', 'ингушет', 'кабардино', 'калмыки',
+        'калуж', 'карели', 'киров', 'коми', 'костром', 'краснодар', 'курск', 'липецк', 'марий',
+        'мордови', 'мурманск', 'ненец', 'нижегород', 'новгород', 'орлов', 'пензен', 'псков',
+        'ростов', 'рязан', 'смолен', 'ставрополь', 'тамбов', 'татарстан', 'твер', 'тульск',
+        'чечн', 'чуваш', 'ярослав'];
+
+    if (mskZones.some(z => r.includes(z))) return 3;
+
+    return null;
+}
+
+/** Более точная оценка часового пояса (UTC offset) по долготе для России (как fallback) */
 function getRussiaTimeOffset(lon) {
-    if (lon < 22.5) return 2;   // Калининград (+2)
-    if (lon < 45.0) return 3;   // Москва, СПб (+3)
-    if (lon < 53.0) return 4;   // Самара, Ижевск (+4)
-    if (lon < 69.5) return 5;   // Екатеринбург, Пермь (+5)
-    if (lon < 82.5) return 6;   // Омск (+6)
-    if (lon < 97.5) return 7;   // Новосибирск, Красноярск (+7)
-    if (lon < 112.5) return 8;  // Иркутск (+8)
-    if (lon < 127.5) return 9;  // Якутск (+9)
-    if (lon < 140.0) return 10; // Владивосток (+10)
-    if (lon < 155.0) return 11; // Магадан, Сахалин (+11)
-    return 12;                  // Камчатка (+12)
+    if (lon < 22.5) return 2;   // Калининград
+    if (lon < 45.0) return 3;   // Москва
+    if (lon < 53.0) return 4;   // Самара
+    if (lon < 69.5) return 5;   // Екатеринбург
+    if (lon < 82.5) return 6;   // Омск
+    if (lon < 97.5) return 7;   // Красноярск
+    if (lon < 112.5) return 8;  // Иркутск
+    if (lon < 127.5) return 9;  // Якутск
+    if (lon < 140.0) return 10; // Владивосток
+    if (lon < 155.0) return 11; // Магадан
+    return 12;                  // Камчатка
 }
 
 /** Определение текущего рабочего статуса заправки */
@@ -696,8 +751,17 @@ function getStationStatus(feature) {
 
     if (isVremenno) return 'vremenno';
 
+    const lat = feature.geometry.coordinates[0];
     const lon = feature.geometry.coordinates[1];
-    const offset = getRussiaTimeOffset(lon);
+
+    // Пытаемся получить оффсет по региону
+    let offset = getOffsetByRegion(p.region);
+
+    // Если по региону не вышло (обычная заправка), используем улучшенную долготу
+    if (offset === null) {
+        offset = getRussiaTimeOffset(lon);
+    }
+
     const now = new Date();
     const utcDate = new Date(now.getTime());
     const stationTime = new Date(utcDate.getTime() + (offset * 3600000));
@@ -759,13 +823,17 @@ function getStationStatus(feature) {
             // Специальный маркер для "реализация газа" - это рабочее время
             const isGasSale = seg.includes('реализация газа');
 
-            const timeRegex = /(\d{1,2})\s*[:.-ч]\s*(\d{1,2})?\s*(?:мин)?\s*(?:-|по|до)\s*(\d{1,2})\s*[:.-ч]\s*(\d{1,2})?\s*(?:мин)?/g;
+            const timeRegex = /(?:с\s*)?(\d{1,2})(?:\s*[:.ч\-\s]\s*(\d{1,2}))?\s*(?:мин)?\s*(?:-|по|до)\s*(?:до\s*)?(\d{1,2})(?:\s*[:.ч\-\s]\s*(\d{1,2}))?\s*(?:мин)?/gi;
             let m;
             while ((m = timeRegex.exec(seg)) !== null) {
                 const startH = parseInt(m[1]);
                 const startM = m[2] ? parseInt(m[2]) : 0;
                 const endH = parseInt(m[3]);
                 const endM = m[4] ? parseInt(m[4]) : 0;
+
+                // Валидация: часы 0-24, минуты 0-59. Игнорируем подозрительные данные (например, номера телефонов).
+                if (startH > 24 || startM > 59 || endH > 24 || endM > 59) continue;
+
                 const interval = { start: startH * 60 + startM, end: endH * 60 + endM };
                 if (isBreak && !isGasSale) breakIntervals.push(interval);
                 else workingIntervals.push(interval);
@@ -835,6 +903,38 @@ function buildAmenitiesHtml(am, timeStatus) {
     ).join('');
 }
 
+/** Очистка текста расписания от лишней информации (телефонов, префиксов "газ" и т.д.) */
+function cleanScheduleText(text) {
+    if (!text) return '';
+
+    // Разделяем на части по точке с запятой или новой строке
+    const segments = text.split(/[;\n]/);
+
+    const cleanedSegments = segments.map(seg => {
+        let s = seg.trim();
+        if (!s) return '';
+
+        // 1. Проверяем, не является ли сегмент просто набором цифр (телефоном)
+        const digits = s.replace(/\D/g, '');
+        // Если цифр много (7+) и нет признаков времени (двоеточие или " - ") — это шум.
+        if (digits.length >= 7 && !s.includes(':') && !s.includes(' - ')) {
+            return '';
+        }
+
+        // 2. Очищаем от известных префиксов
+        s = s.replace(/\b(?:тел|т|факс|газ|реализация газа)\.?\s*[:.\-]?\s*/gi, '')
+            .replace(/\(\s*\)/g, '') // Пустые скобки
+            .trim();
+
+        // 3. Убираем висячую пунктуацию и лишние пробелы
+        s = s.replace(/^[;,\s.\-\)]+|[;,\s.\-\(]+$/g, '').replace(/\s+/g, ' ');
+
+        return s;
+    }).filter(s => s.length > 3 || /24\/7|пн|вт|ср|чт|пт|сб|вс/i.test(s));
+
+    return cleanedSegments.join('; ') || text;
+}
+
 // Разметка балуна
 function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const singleNavLink = `https://yandex.ru/maps/?rtext=~${latS},${lonS}`;
@@ -858,7 +958,8 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
         // Газпромовская заправка — структурированный формат
         html += `<div class="station-info-row"><b>Адрес:</b> ${p.addressClean}</div>`;
         if (p.scheduleClean) {
-            html += `<div class="station-info-row"><b>Режим работы:</b> ${p.scheduleClean}</div>`;
+            const prettySchedule = cleanScheduleText(p.scheduleClean);
+            html += `<div class="station-info-row"><b>Режим работы:</b> ${prettySchedule}</div>`;
         }
         const amenityBadges = buildAmenitiesHtml(p.amenities || {}, p.timeStatus);
         if (amenityBadges) {
@@ -870,7 +971,8 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
             html += `<div class="station-info-row"><b>Адрес:</b> ${p.addressClean}</div>`;
         }
         if (p.scheduleClean) {
-            html += `<div class="station-info-row"><b>Режим работы:</b> ${p.scheduleClean}</div>`;
+            const prettySchedule = cleanScheduleText(p.scheduleClean);
+            html += `<div class="station-info-row"><b>Режим работы:</b> ${prettySchedule}</div>`;
         }
     }
 
