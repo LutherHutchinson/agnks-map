@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: '0 * * * *'  # Каждые 1 час
+  workflow_dispatch:      # Ручной запуск
 
 # Разрешения для деплоя на GitHub Pages
 permissions:
@@ -30,6 +33,11 @@ jobs:
           echo "    YANDEX_MAPS_API_KEY: '${{ secrets.YANDEX_API_KEY }}'," >> config.js
           echo "    YANDEX_SUGGEST_API_KEY: '${{ secrets.YANDEX_SUGGEST_API_KEY }}'" >> config.js
           echo "};" >> config.js
+
+      # 2c. Загружаем свежие данные Газпрома
+      - name: Update Gazprom Station Data
+        run: |
+          python3 update_stations.py
 
       # 2b. Диагностика — проверяем, что config.js создан (ключи скрыты)
       - name: Verify config.js (debug)

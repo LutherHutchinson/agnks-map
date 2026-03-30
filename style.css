@@ -1023,7 +1023,7 @@ input[type="range"] {
     height: 14px;
     position: relative;
     border-radius: 50% 50% 0 50%;
-    transform: rotate(-135deg);
+    transform: rotate(45deg);
     /* Поворот для формы капли наконечником вниз */
     flex-shrink: 0;
     box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
@@ -1045,26 +1045,29 @@ input[type="range"] {
 }
 
 .marker-always {
-    background-color: #1b5e20;
+    background-color: #52AB32;
 }
 
 .marker-open {
-    background-color: #2e7d32;
+    background-color: #7CD859;
+}
+
+.marker-break {
+    background-color: #F1993F;
 }
 
 .marker-closed {
-    background-color: #757575;
+    background-color: #B3B3B3;
 }
 
 .marker-vremenno {
-    background-color: #c62828;
+    background-color: #DB534B;
 }
 
 .marker-no-data {
-    background-color: #1565c0;
+    background-color: #4996F8;
 }
 
 .marker-added {
-    background-color: #ffeb3b;
-    border: 1px solid #fbc02d;
+    background-color: #F8D44E;
 }

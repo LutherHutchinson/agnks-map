@@ -13,8 +13,8 @@ const MAP_CENTER = isMobile ? [56.52401, 87.318756] : [56.52401, 90.318756];
 const MAP_ZOOM = isMobile ? 1.5 : 4;
 
 // Иконки меток
-const ICON_STATION_DEFAULT = 'islands#blueIcon';
-const ICON_STATION_ADDED = 'islands#yellowIcon';
+const ICON_STATION_DEFAULT = 'islands#blueDotIcon';
+const ICON_STATION_ADDED = 'islands#yellowDotIcon';
 
 // Стиль маршрута
 const ROUTE_LINE_COLOR = '#1e98ff';
@@ -85,8 +85,16 @@ async function loadStations() {
 
     let gazpromData, allData;
     try {
-        const [resGazprom, resAll] = await Promise.all([
-            fetch('gazprom_stations.json'),
+        // Пробуем загрузить актуальные данные через прокси
+        let resGazprom = await fetch('api/gazprom_stations');
+
+        // Если прокси не ответил (например, сервер не запущен или ошибка)
+        if (!resGazprom.ok) {
+            console.warn('Dynamic Gazprom API failed, falling back to static file');
+            resGazprom = await fetch(`gazprom_stations.json?t=${Date.now()}`);
+        }
+
+        const [resAll] = await Promise.all([
             fetch('stations.json')
         ]);
 
@@ -101,7 +109,8 @@ async function loadStations() {
     }
 
     const itemsGazprom = gazpromData.elements ? gazpromData.elements : gazpromData;
-    const tolerance = 0.01; // ~1 км погрешности при совпадении координат из разных источников
+    console.log(`[Stations] Loaded ${itemsGazprom.length} Gazprom stations and ${allData.length} from primary base.`);
+    const tolerance = 0.01;
 
     // Сначала парсим заправки Газпрома
     itemsGazprom.forEach(function (item) {
@@ -155,6 +164,7 @@ async function loadStations() {
                 addressClean,
                 scheduleClean,
                 isClosed,
+                closeStatus: el.close, // Сохраняем поле close ("1" - ок, "0" - закрыто)
                 clusterCaption: el.city ? `${el.city}, ${nameClean}` : nameClean,
                 hintContent: nameClean,
                 rawCoords: coords,
@@ -172,7 +182,8 @@ async function loadStations() {
                     charging: !!el.charging_for_electric_cars,
                     washing: !!el.automatic_washing,
                     tire_inflation: !!el.tire_inflation
-                }
+                },
+                updatedAt: el.updated_at
             }
         };
     }
@@ -189,11 +200,12 @@ async function loadStations() {
 
         const bodyClean = stripHtml(rawBody);
 
-        // Разбиваем на строки и классифицируем
-        const lines = bodyClean.split('\n').map(s => s.trim()).filter(Boolean);
+        const lines = bodyClean.split('\n')
+            .map(s => s.replace(/^(?:адрес|режим\s*(?:работы|раб)|тел(?:ефон)?|факс)\s*[:.-]?\s*/iu, '').trim())
+            .filter(Boolean);
 
         const phoneRegex = /(\+7|8\s*[\(\-]?\d{3}|\бтел\b|факс)/i;
-        const scheduleRegex = /\d{1,2}:\d{2}|ежедневн|круглосуточно|пн|вт|ср|чт|пт|сб|вс|суббот|воскрес|выходн|перерыв|режим раб|принима|без перерыв/i;
+        const scheduleRegex = /\d{1,2}[:.-]\d{2}|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв/iu;
 
         const addressLines = [], scheduleLines = [], phoneLines = [];
 
@@ -572,6 +584,8 @@ function filterAndRenderStations() {
             preset = ICON_STATION_ADDED;
         } else if (timeStatus === 'vremenno') {
             preset = 'islands#redDotIcon';
+        } else if (timeStatus === 'break') {
+            preset = 'islands#orangeDotIcon';
         } else if (timeStatus === 'closed') {
             preset = 'islands#grayDotIcon';
         } else if (timeStatus === 'open') {
@@ -620,6 +634,9 @@ function passesAmenityFilter(feature, amenities, timeStatus) {
     return amenities.every(key => {
         if (key === 'is_open_now') {
             return timeStatus === 'open' || timeStatus === 'always';
+        }
+        if (key === 'around_the_clock') {
+            return timeStatus === 'always';
         }
         return am[key];
     });
@@ -670,62 +687,118 @@ function getRussiaTimeOffset(lon) {
 /** Определение текущего рабочего статуса заправки */
 function getStationStatus(feature) {
     const p = feature.properties;
-    if (p.isClosed) return 'vremenno';
 
-    // Если явно указано "круглосуточно" в удобствах Газпрома
-    if (p.amenities && p.amenities.around_the_clock) return 'always';
+    // "Временно не работает" в любом из полей
+    const isVremenno = (p.nameClean && p.nameClean.includes('Временно не работает')) ||
+        (p.addressClean && p.addressClean.includes('Временно не работает')) ||
+        (p.scheduleClean && p.scheduleClean.includes('Временно не работает')) ||
+        p.isClosed;
+
+    if (isVremenno) return 'vremenno';
+
+    const lon = feature.geometry.coordinates[1];
+    const offset = getRussiaTimeOffset(lon);
+    const now = new Date();
+    const utcDate = new Date(now.getTime());
+    const stationTime = new Date(utcDate.getTime() + (offset * 3600000));
+    const dayToday = stationTime.getUTCDay(); // 0 - вс, 1 - пн
+    const absMins = (stationTime.getUTCHours() * 60) + stationTime.getUTCMinutes();
 
     const schedule = p.scheduleClean ? p.scheduleClean.toLowerCase() : '';
     if (!schedule) return 'no_data';
 
-    if (schedule.includes('круглосуточно')) return 'always';
-    if (schedule.includes('временно не работает')) return 'vremenno';
+    const isAlways = schedule.includes('круглосуточно') || schedule.includes('24/7');
+    const segments = schedule.split(/[;\n]\s*/);
 
-    // Определяем локальное время на заправке
-    const lon = feature.geometry.coordinates[1];
-    const offset = getRussiaTimeOffset(lon);
+    let workingIntervals = [];
+    let breakIntervals = [];
 
-    // Используем UTC время напрямую (избегаем путаницы с локальной зоной браузера)
-    const now = new Date();
-    const utcMins = (now.getUTCHours() * 60) + now.getUTCMinutes();
-    const absMins = (utcMins + (offset * 60) + 1440) % 1440;
+    const dayMap = {
+        'пн': 1, 'вт': 2, 'ср': 3, 'чт': 4, 'пт': 5, 'сб': 6, 'вс': 0,
+        'будни': [1, 2, 3, 4, 5], 'выходн': [6, 0], 'ежедневно': [0, 1, 2, 3, 4, 5, 6]
+    };
 
-    // Сначала ищем ВСЕ временные интервалы в расписании
-    const allIntervals = Array.from(schedule.matchAll(/(\d{1,2})[:.](\d{2})\s*(?:-|по|до)\s*(\d{1,2})[:.](\d{2})/g));
+    segments.forEach(seg => {
+        if (!seg.trim()) return;
 
-    if (schedule.includes('круглосуточно') || schedule.includes('24/7')) {
-        // Для круглосуточных заправок любой найденный интервал считается техническим перерывом
-        for (const m of allIntervals) {
-            const bStart = parseInt(m[1]) * 60 + parseInt(m[2]);
-            const bEnd = parseInt(m[3]) * 60 + parseInt(m[4]);
-            if (absMins >= bStart && absMins <= bEnd) return 'closed';
+        let segDays = [];
+        let hasDayMarker = false;
+
+        // Диапазоны дней (пн-вс)
+        const rangeMatches = seg.matchAll(/(пн|вт|ср|чт|пт|сб|вс)\s*-\s*(пн|вт|ср|чт|пт|сб|вс)/g);
+        for (const m of rangeMatches) {
+            hasDayMarker = true;
+            let start = dayMap[m[1]];
+            let end = dayMap[m[2]];
+            let s = start === 0 ? 7 : start;
+            let e = end === 0 ? 7 : end;
+            if (s > e) [s, e] = [e, s];
+            for (let i = s; i <= e; i++) segDays.push(i % 7);
         }
-        return 'always';
+
+        // Отдельные дни и группы
+        const singleMatches = seg.match(/(?<![а-яё])(пн|вт|ср|чт|пт|сб|вс|будни|выходн|ежедневно)(?![а-яё])/g);
+        if (singleMatches) {
+            singleMatches.forEach(val => {
+                hasDayMarker = true;
+                const d = dayMap[val];
+                if (Array.isArray(d)) segDays.push(...d);
+                else segDays.push(d);
+            });
+        }
+
+        // Если в сегменте нет дней, но это первая часть или круглосуточно
+        if (!hasDayMarker) segDays = [0, 1, 2, 3, 4, 5, 6];
+
+        if (segDays.includes(dayToday)) {
+            // Проверка на наличие "перерыв" или "пересменка", но без слов "без", "нет", "отсутствуют" перед ним
+            const isBreakTrigger = /перерыв|пересменка/i.test(seg);
+            const isNegative = /(?:без|нет|отсутствуют)\s+(?:тех\.\s*)?(?:перерыв|пересменка)/i.test(seg);
+            const isBreak = isBreakTrigger && !isNegative;
+
+            // Специальный маркер для "реализация газа" - это рабочее время
+            const isGasSale = seg.includes('реализация газа');
+
+            const timeRegex = /(\d{1,2})\s*[:.-ч]\s*(\d{1,2})?\s*(?:мин)?\s*(?:-|по|до)\s*(\d{1,2})\s*[:.-ч]\s*(\d{1,2})?\s*(?:мин)?/g;
+            let m;
+            while ((m = timeRegex.exec(seg)) !== null) {
+                const startH = parseInt(m[1]);
+                const startM = m[2] ? parseInt(m[2]) : 0;
+                const endH = parseInt(m[3]);
+                const endM = m[4] ? parseInt(m[4]) : 0;
+                const interval = { start: startH * 60 + startM, end: endH * 60 + endM };
+                if (isBreak && !isGasSale) breakIntervals.push(interval);
+                else workingIntervals.push(interval);
+            }
+        }
+
+    });
+
+    // Финальная проверка статуса
+    for (const b of breakIntervals) {
+        if (absMins >= b.start && absMins < b.end) return 'break';
     }
 
-    if (allIntervals.length > 0) {
-        // Первый найденный интервал считаем основным рабочим временем
-        const main = allIntervals[0];
-        const start = parseInt(main[1]) * 60 + parseInt(main[2]);
-        const end = parseInt(main[3]) * 60 + parseInt(main[4]);
-
-        let isOpen = false;
-        if (end > start) {
-            isOpen = (absMins >= start && absMins < end);
-        } else {
-            // Обработка перехода через полночь (например, 08:00 - 02:00)
-            isOpen = (absMins >= start || absMins < end);
-        }
-
-        if (isOpen) {
-            // Если текущее время в основном интервале, проверяем дополнительные интервалы (перерывы)
-            for (let i = 1; i < allIntervals.length; i++) {
-                const m = allIntervals[i];
-                const bStart = parseInt(m[1]) * 60 + parseInt(m[2]);
-                const bEnd = parseInt(m[3]) * 60 + parseInt(m[4]);
-                if (absMins >= bStart && absMins <= bEnd) return 'closed';
+    if (workingIntervals.length > 0) {
+        for (const w of workingIntervals) {
+            if (w.end > w.start) {
+                if (absMins >= w.start && absMins < w.end) return 'open';
+            } else { // Переход через полночь
+                if (absMins >= w.start || absMins < w.end) return 'open';
             }
-            return 'open';
+        }
+        return 'closed';
+    }
+
+    if (isAlways) return 'always';
+
+    if (workingIntervals.length > 0) {
+        for (const w of workingIntervals) {
+            if (w.end > w.start) {
+                if (absMins >= w.start && absMins < w.end) return 'open';
+            } else { // Переход через полночь
+                if (absMins >= w.start || absMins < w.end) return 'open';
+            }
         }
         return 'closed';
     }
@@ -734,7 +807,7 @@ function getStationStatus(feature) {
 }
 
 // Иконки удобств для заправок Газпрома
-function buildAmenitiesHtml(am) {
+function buildAmenitiesHtml(am, timeStatus) {
     const items = [
         { key: 'around_the_clock', icon: '🕐', label: 'Круглосуточно' },
         { key: 'cng', icon: '🔵', label: 'КПГ' },
@@ -748,7 +821,12 @@ function buildAmenitiesHtml(am) {
         { key: 'charging', icon: '⚡', label: 'Зарядка для электрокаров' },
         { key: 'washing', icon: '🚗', label: 'Автомойка' },
         { key: 'tire_inflation', icon: '🔧', label: 'Подкачка шин' }
-    ].filter(item => am[item.key]);
+    ].filter(item => {
+        if (item.key === 'around_the_clock') {
+            return timeStatus === 'always';
+        }
+        return am[item.key];
+    });
 
     if (!items.length) return '';
 
@@ -767,6 +845,7 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
 
     const statusMap = {
         'vremenno': { text: 'Временно не работает', color: '#c62828', icon: '❌' },
+        'break': { text: 'Технический перерыв', color: '#ef6c00', icon: '🛠️' },
         'closed': { text: 'Закрыто сейчас', color: '#757575', icon: '🕒' },
         'open': { text: 'Открыто сейчас', color: '#2e7d32', icon: '🟢' },
         'always': { text: 'Круглосуточно', color: '#1b5e20', icon: '♾️' },
@@ -781,7 +860,7 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
         if (p.scheduleClean) {
             html += `<div class="station-info-row"><b>Режим работы:</b> ${p.scheduleClean}</div>`;
         }
-        const amenityBadges = buildAmenitiesHtml(p.amenities || {});
+        const amenityBadges = buildAmenitiesHtml(p.amenities || {}, p.timeStatus);
         if (amenityBadges) {
             html += `<div class="station-info-row"><b>Удобства:</b></div><div class="amenities-row">${amenityBadges}</div>`;
         }
@@ -947,7 +1026,7 @@ async function loadGuide() {
 
 async function fetchComments() {
     try {
-        const res = await fetch('/api/comments');
+        const res = await fetch('api/comments');
         if (res.ok) {
             userComments = await res.json();
         }
@@ -982,7 +1061,7 @@ async function onCommentSubmit(stationId) {
     if (!text) return;
 
     try {
-        const response = await fetch('/api/comments', {
+        const response = await fetch('api/comments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ stationId, text })
@@ -1249,4 +1328,3 @@ function initBottomSheetResize() {
     window.addEventListener('mouseup', onEnd);
     window.addEventListener('touchend', onEnd);
 }
-
