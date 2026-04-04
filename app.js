@@ -44,6 +44,18 @@ let selectedWaypoints = [];
 
 // Пользовательские отзывы
 let userComments = {};
+let supabaseClient = null;
+
+// Инициализация Supabase (если указаны ключи в config.js)
+if (CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) {
+    try {
+        // Используем глобальный объект supabase из подключенного SDK
+        supabaseClient = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+        console.log('Supabase initialized');
+    } catch (e) {
+        console.error('Failed to init Supabase:', e);
+    }
+}
 
 ymaps.ready(init);
 
@@ -83,51 +95,91 @@ async function init() {
 async function loadStations() {
     setStatus('Загрузка базы станций…');
 
-    let gazpromData, allData;
+    let gazpromData = [], agnksRuData = [], allData = [];
     try {
         // Пробуем загрузить актуальные данные через прокси
-        let resGazprom = await fetch('api/gazprom_stations');
+        let resGazprom = await fetch('api/gazprom_stations').catch(() => null);
+        let resAgnksRu = await fetch('api/agnks_ru_stations').catch(() => null);
 
-        // Если прокси не ответил (например, сервер не запущен или ошибка)
-        if (!resGazprom.ok) {
+        // Если прокси не ответил
+        if (!resGazprom || !resGazprom.ok) {
             console.warn('Dynamic Gazprom API failed, falling back to static file');
-            resGazprom = await fetch(`gazprom_stations.json?t=${Date.now()}`);
+            resGazprom = await fetch(`gazprom_stations.json?t=${Date.now()}`).catch(() => null);
+        }
+        if (!resAgnksRu || !resAgnksRu.ok) {
+            console.warn('Dynamic AgnksRu API failed, falling back to static file');
+            resAgnksRu = await fetch(`agnks_ru.json?t=${Date.now()}`).catch(() => null);
         }
 
-        const [resAll] = await Promise.all([
-            fetch('stations.json')
-        ]);
+        const resAll = await fetch('stations.json').catch(() => null);
 
-        if (!resGazprom.ok) throw new Error(`HTTP Gazprom ${resGazprom.status}`);
-        if (!resAll.ok) throw new Error(`HTTP All ${resAll.status}`);
-
-        gazpromData = await resGazprom.json();
-        allData = await resAll.json();
+        if (resGazprom && resGazprom.ok) {
+            try { gazpromData = await resGazprom.json(); } catch (e) { }
+        }
+        if (resAgnksRu && resAgnksRu.ok) {
+            try { agnksRuData = await resAgnksRu.json(); } catch (e) { }
+        }
+        if (resAll && resAll.ok) {
+            try { allData = await resAll.json(); } catch (e) { }
+        }
     } catch (err) {
-        setStatus(`Ошибка загрузки баз станций: ${err.message}`);
-        return;
+        console.error('Ошибка загрузки станций:', err);
     }
 
-    const itemsGazprom = gazpromData.elements ? gazpromData.elements : gazpromData;
-    console.log(`[Stations] Loaded ${itemsGazprom.length} Gazprom stations and ${allData.length} from primary base.`);
-    const tolerance = 0.01;
+    const itemsGazprom = gazpromData && gazpromData.elements ? gazpromData.elements : (Array.isArray(gazpromData) ? gazpromData : []);
+    const itemsAgnksRu = Array.isArray(agnksRuData) ? agnksRuData : [];
+    const itemsAll = Array.isArray(allData) ? allData : [];
+    console.log(`[Stations] Loaded ${itemsGazprom.length} Gazprom, ${itemsAgnksRu.length} AgnksRu, ${itemsAll.length} primary.`);
 
-    // Сначала парсим заправки Газпрома
+    const tolerance = 0.01;
+    const processedPosIds = new Set();
+    const processedNames = new Map(); // name -> [lat, lon] for fuzzy proximity
+
+    function extractPosId(name) {
+        if (!name) return null;
+        const match = name.match(/POS-(\d+)/i);
+        return match ? match[1] : null;
+    }
+
+    function normalizeName(name) {
+        if (!name) return '';
+        return name.toLowerCase()
+            .replace(/^(?:р\.п\.|г\.|с\.|п\.|ст\.|дер\.)\s+/g, '')
+            .replace(/[^а-яё0-9]/g, '');
+    }
+
+    // 1. Сначала парсим заправки Газпрома (Приоритет 1)
     itemsGazprom.forEach(function (item) {
         if (item.gps) {
             const parsed = parseGazpromStation(item);
-            if (parsed) allFeatures.push(parsed);
+            if (parsed) {
+                allFeatures.push(parsed);
+                const posId = extractPosId(parsed.properties.nameClean);
+                if (posId) processedPosIds.add(posId);
+                processedNames.set(normalizeName(parsed.properties.nameClean), parsed.geometry.coordinates);
+            }
         }
     });
 
-    // Затем парсим общую базу, исключая дубликаты
-    allData.forEach(function (item) {
-        if (item.type === 'Feature' && item.geometry && item.properties) {
-            const parsed = parseStation(item);
+    // 2. Затем парсим заправки agnks.ru (Приоритет 2)
+    itemsAgnksRu.forEach(function (item) {
+        if (item.lat && item.lon) {
+            const parsed = parseAgnksRuStation(item);
             if (!parsed) return;
 
+            const name = parsed.properties.nameClean;
+            const posId = extractPosId(name);
+            if (posId && processedPosIds.has(posId)) return; // Дубликат по POS ID
+
+            const normName = normalizeName(name);
             const [latNew, lonNew] = parsed.geometry.coordinates;
-            // Проверяем, нет ли уже газпромовской заправки с такими же координатами
+
+            // Проверка по имени и близости (если координаты не совсем совпадают)
+            if (processedNames.has(normName)) {
+                const [latE, lonE] = processedNames.get(normName);
+                if (Math.abs(latE - latNew) < 0.1 && Math.abs(lonE - lonNew) < 0.1) return;
+            }
+
             const isDuplicate = allFeatures.some(existing => {
                 const [latE, lonE] = existing.geometry.coordinates;
                 return Math.abs(latE - latNew) < tolerance && Math.abs(lonE - lonNew) < tolerance;
@@ -135,6 +187,39 @@ async function loadStations() {
 
             if (!isDuplicate) {
                 allFeatures.push(parsed);
+                if (posId) processedPosIds.add(posId);
+                processedNames.set(normName, [latNew, lonNew]);
+            }
+        }
+    });
+
+    // 3. Затем парсим общую базу stations.json (Приоритет 3)
+    itemsAll.forEach(function (item) {
+        if (item.type === 'Feature' && item.geometry && item.properties) {
+            const parsed = parseStation(item);
+            if (!parsed) return;
+
+            const name = parsed.properties.nameClean;
+            const posId = extractPosId(name);
+            if (posId && processedPosIds.has(posId)) return;
+
+            const normName = normalizeName(name);
+            const [latNew, lonNew] = parsed.geometry.coordinates;
+
+            if (processedNames.has(normName)) {
+                const [latE, lonE] = processedNames.get(normName);
+                if (Math.abs(latE - latNew) < 0.1 && Math.abs(lonE - lonNew) < 0.1) return;
+            }
+
+            const isDuplicate = allFeatures.some(existing => {
+                const [latE, lonE] = existing.geometry.coordinates;
+                return Math.abs(latE - latNew) < tolerance && Math.abs(lonE - lonNew) < tolerance;
+            });
+
+            if (!isDuplicate) {
+                allFeatures.push(parsed);
+                if (posId) processedPosIds.add(posId);
+                processedNames.set(normName, [latNew, lonNew]);
             }
         }
     });
@@ -145,22 +230,31 @@ async function loadStations() {
     // Парсинг "сырых" данных Газпрома
     function parseGazpromStation(el) {
         const coords = el.gps.split(',').map(s => parseFloat(s.trim()));
-        if (!coords || coords.length !== 2 || isNaN(coords[0]) || (coords[0] === 0 && coords[1] === 0)) return null;
+        if (!coords || coords.length !== 2 || isNaN(coords[0]) || !coords[0]) return null;
 
-        const nameClean = stripHtml(el.name || 'АГНКС').replace(/^Временно не работает \((.+)\)$/, '$1');
+        // Фильтруем строящиеся/планируемые
+        const nameClean = stripHtml(el.name || 'АГНКС');
+        const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен/i;
+        const addressRaw = el.address || '';
+        const scheduleRaw = el.schedule || '';
+        if (constructionKeywords.test(nameClean) || constructionKeywords.test(addressRaw) || constructionKeywords.test(scheduleRaw)) {
+            return null;
+        }
+
+        const nameFinal = nameClean.replace(/^Временно не работает \((.+)\)$/, '$1');
         const addressClean = stripHtml((el.address || '').replace(/^Временно не работает \((.+)\)$/, '$1'));
         const scheduleClean = el.schedule || '';
         const isClosed = scheduleClean === 'Временно не работает';
 
         return {
             type: 'Feature',
-            id: el.id,
+            id: 'gazprom_' + el.id,
             geometry: {
                 type: 'Point',
                 coordinates: coords
             },
             properties: {
-                nameClean,
+                nameClean: nameFinal,
                 addressClean,
                 scheduleClean,
                 isClosed,
@@ -188,6 +282,59 @@ async function loadStations() {
         };
     }
 
+    // Парсинг данных agnks.ru
+    function parseAgnksRuStation(el) {
+        const coords = [el.lat, el.lon];
+        if (isNaN(coords[0]) || isNaN(coords[1])) return null;
+
+        // Фильтруем строящиеся и планируемые АГНКС
+        const statusStr = (el.status || '').toLowerCase();
+        const scheduleStr = (el.schedule || '').toLowerCase();
+        const addressStr = (el.address || '').toLowerCase();
+        const brandStr = (el.brand || '').toLowerCase();
+        const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен|в\s*плане/i;
+
+        if (constructionKeywords.test(statusStr) || constructionKeywords.test(scheduleStr) || constructionKeywords.test(addressStr) || constructionKeywords.test(brandStr)) {
+            return null;
+        }
+
+        let baseName = stripHtml(el.brand || 'АГНКС').replace(/^Временно не работает \((.+)\)$/, '$1');
+
+        const nameClean = baseName;
+        const addressClean = stripHtml((el.address || '').replace(/^Временно не работает \((.+)\)$/, '$1'));
+        const scheduleClean = el.schedule || '';
+
+        let isClosed = false;
+        if (scheduleClean.includes('Временно не работает') || (el.status && el.status.toLowerCase().includes('закрыта'))) {
+            isClosed = true;
+        }
+
+        return {
+            type: 'Feature',
+            id: 'agnks_' + Math.random().toString(36).substr(2, 9),
+            geometry: {
+                type: 'Point',
+                coordinates: coords
+            },
+            properties: {
+                nameClean,
+                addressClean,
+                scheduleClean,
+                phoneClean: el.phone || '',
+                isClosed: isClosed,
+                closeStatus: isClosed ? "0" : "1",
+                clusterCaption: nameClean,
+                hintContent: nameClean,
+                rawCoords: coords,
+                amenities: {
+                    around_the_clock: /круглосуточно|24\/7|24ч/i.test(scheduleClean),
+                    cng: true
+                },
+                updatedAt: new Date().toISOString()
+            }
+        };
+    }
+
     // Нормализация данных стандартной станции
     function parseStation(item) {
         const nameClean = stripHtml(item.properties.hintContent || 'АГНКС');
@@ -207,6 +354,15 @@ async function loadStations() {
         const phoneRegex = /(\+7|8\s*[\(\-]?\d{3}|\бтел\b|факс)/i;
         const scheduleRegex = /\d{1,2}[:.\-\s]\d{2}|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв/iu;
 
+        // Фильтруем строящиеся/планируемые (проверяем все поля)
+        const headerRaw = item.properties.balloonContentHeader || '';
+        const hintRaw = item.properties.hintContent || '';
+        const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен/i;
+
+        if (constructionKeywords.test(hintRaw) || constructionKeywords.test(headerRaw) || constructionKeywords.test(rawBody)) {
+            return null;
+        }
+
         const addressLines = [], scheduleLines = [], phoneLines = [];
 
         for (const line of lines) {
@@ -221,7 +377,7 @@ async function loadStations() {
 
         return {
             type: 'Feature',
-            id: item.id,
+            id: 'main_' + item.id,
             geometry: {
                 type: 'Point',
                 coordinates: item.geometry.coordinates
@@ -584,6 +740,8 @@ function filterAndRenderStations() {
             preset = ICON_STATION_ADDED;
         } else if (timeStatus === 'vremenno') {
             preset = 'islands#redDotIcon';
+        } else if (timeStatus === 'permit') {
+            preset = 'islands#blackDotIcon';
         } else if (timeStatus === 'break') {
             preset = 'islands#orangeDotIcon';
         } else if (timeStatus === 'closed') {
@@ -743,13 +901,20 @@ function getRussiaTimeOffset(lon) {
 function getStationStatus(feature) {
     const p = feature.properties;
 
-    // "Временно не работает" в любом из полей
     const isVremenno = (p.nameClean && p.nameClean.includes('Временно не работает')) ||
         (p.addressClean && p.addressClean.includes('Временно не работает')) ||
         (p.scheduleClean && p.scheduleClean.includes('Временно не работает')) ||
         p.isClosed;
 
     if (isVremenno) return 'vremenno';
+
+    // "По пропускам" / Только служебные
+    const permitRegex = /по\s*пропускам|пропускной\s*режим|спецпропуск|сотрудников\s*комбината|по\s*договору|служебн[а-я]*\s*транспорт[а-я]*|только\s*для\s*юрлиц|только\s*служебн[а-я]*/i;
+    const isPermit = (p.nameClean && permitRegex.test(p.nameClean)) ||
+        (p.addressClean && permitRegex.test(p.addressClean)) ||
+        (p.scheduleClean && permitRegex.test(p.scheduleClean));
+
+    if (isPermit) return 'permit';
 
     const lat = feature.geometry.coordinates[0];
     const lon = feature.geometry.coordinates[1];
@@ -768,14 +933,44 @@ function getStationStatus(feature) {
     const dayToday = stationTime.getUTCDay(); // 0 - вс, 1 - пн
     const absMins = (stationTime.getUTCHours() * 60) + stationTime.getUTCMinutes();
 
-    const schedule = p.scheduleClean ? p.scheduleClean.toLowerCase() : '';
+    let schedule = p.scheduleClean ? p.scheduleClean.toLowerCase() : '';
     if (!schedule) return 'no_data';
 
-    const isAlways = schedule.includes('круглосуточно') || schedule.includes('24/7');
+    // Нормализация дней недели
+    schedule = schedule
+        .replace(/понедельник[а-я]*/g, 'пн')
+        .replace(/вторник[а-я]*/g, 'вт')
+        .replace(/сред[ауы][а-я]*/g, 'ср')
+        .replace(/четверг[а-я]*/g, 'чт')
+        .replace(/пятниц[ауы][а-я]*/g, 'пт')
+        .replace(/суббот[ауы][а-я]*/g, 'сб')
+        .replace(/воскресень[ея][а-я]*/g, 'вс')
+        .replace(/(?:по\s*)?рабочи(?:м|е)\s*дн(?:ям|и)/g, 'будни')
+        .replace(/будни[ех]?/g, 'будни')
+        .replace(/выходны[ех]/g, 'выходн')
+        .replace(/(\d{1,2})\s*утра/gi, '$1:00') // 6 утра -> 6:00
+        .replace(/(\d{1,2})(?::(\d{2}))?\s*вечера/gi, (match, h, m) => {
+            let hour = parseInt(h);
+            const min = m || '00';
+            if (hour < 12) hour += 12;
+            return hour + ':' + min;
+        }) // 9 вечера -> 21:00
+        .replace(/(\d{1,2})\s*-\s*(\d{1,2})\s*ч/gi, '$1:00-$2:00') // 8-20ч -> 8:00-20:00
+        .replace(/(\d{1,2})\s*ч/gi, '$1:00') // 20ч -> 20:00
+        .replace(/\b(\d{1,2})\s*-\s*(\d{1,2})\b/g, (match, h1, h2) => {
+            // Только если это не часть другого формата времени и не диапазон дат
+            return h1 + ':00-' + h2 + ':00';
+        })
+        .replace(/(\d{1,2})\s*(?:-)\s*(\d{2})(?!\d)/g, '$1:$2') // 21-30 -> 21:30
+        .replace(/\s+и\s+до\b/gi, '-');
+
+    const isAlways = /круглосуточно|24\s*\/?\s*7|24\s*[чh]/i.test(schedule);
     const segments = schedule.split(/[;\n]\s*/);
 
     let workingIntervals = [];
     let breakIntervals = [];
+    let explicitlyClosedToday = false;
+    let hasAnyWorkDayData = false;
 
     const dayMap = {
         'пн': 1, 'вт': 2, 'ср': 3, 'чт': 4, 'пт': 5, 'сб': 6, 'вс': 0,
@@ -788,8 +983,8 @@ function getStationStatus(feature) {
         let segDays = [];
         let hasDayMarker = false;
 
-        // Диапазоны дней (пн-вс)
-        const rangeMatches = seg.matchAll(/(пн|вт|ср|чт|пт|сб|вс)\s*-\s*(пн|вт|ср|чт|пт|сб|вс)/g);
+        // Диапазоны дней (пн-вс) - поддержка разных тире: -, —, –, −
+        const rangeMatches = seg.matchAll(/(пн|вт|ср|чт|пт|сб|вс)\s*(?:-|—|–|−)\s*(пн|вт|ср|чт|пт|сб|вс)/g);
         for (const m of rangeMatches) {
             hasDayMarker = true;
             let start = dayMap[m[1]];
@@ -800,49 +995,100 @@ function getStationStatus(feature) {
             for (let i = s; i <= e; i++) segDays.push(i % 7);
         }
 
-        // Отдельные дни и группы
-        const singleMatches = seg.match(/(?<![а-яё])(пн|вт|ср|чт|пт|сб|вс|будни|выходн|ежедневно)(?![а-яё])/g);
-        if (singleMatches) {
-            singleMatches.forEach(val => {
-                hasDayMarker = true;
-                const d = dayMap[val];
-                if (Array.isArray(d)) segDays.push(...d);
-                else segDays.push(d);
+        // Отдельные дни и группы (без lookbehind для совместимости)
+        const dayTokens = seg.match(/[а-яё]+/g);
+        if (dayTokens) {
+            dayTokens.forEach(val => {
+                if (dayMap[val] !== undefined) {
+                    hasDayMarker = true;
+                    const d = dayMap[val];
+                    if (Array.isArray(d)) segDays.push(...d);
+                    else segDays.push(d);
+                }
             });
         }
 
-        // Если в сегменте нет дней, но это первая часть или круглосуточно
-        if (!hasDayMarker) segDays = [0, 1, 2, 3, 4, 5, 6];
+        // Очистка от невидимых символов
+        const cleanSeg = seg.replace(/[\u00A0\u200B\u200E\u200F\uFEFF]/g, ' ').trim();
+        if (!cleanSeg) return;
+
+        if (!hasDayMarker) {
+            segDays = [0, 1, 2, 3, 4, 5, 6];
+            hasDayMarker = true;
+        }
 
         if (segDays.includes(dayToday)) {
-            // Проверка на наличие "перерыв" или "пересменка", но без слов "без", "нет", "отсутствуют" перед ним
-            const isBreakTrigger = /перерыв|пересменка/i.test(seg);
-            const isNegative = /(?:без|нет|отсутствуют)\s+(?:тех\.\s*)?(?:перерыв|пересменка)/i.test(seg);
+            const isBreakTrigger = /перерыв|пересменка/i.test(cleanSeg);
+            const isNegative = /(?:без|нет|отсутствуют)\s+(?:тех\.\s*)?(?:перерыв|пересменка)/i.test(cleanSeg);
             const isBreak = isBreakTrigger && !isNegative;
+            const isGasSale = cleanSeg.includes('реализация газа');
 
-            // Специальный маркер для "реализация газа" - это рабочее время
-            const isGasSale = seg.includes('реализация газа');
-
-            const timeRegex = /(?:с\s*)?(\d{1,2})(?:\s*[:.ч\-\s]\s*(\d{1,2}))?\s*(?:мин)?\s*(?:-|по|до)\s*(?:до\s*)?(\d{1,2})(?:\s*[:.ч\-\s]\s*(\d{1,2}))?\s*(?:мин)?/gi;
+            const timeRegex = /(?:с\s*)?(\d{1,2})(?:\s*[:.ч]\s*(\d{1,2}))?\s*(?:мин)?\s*(?:-|—|–|−|по|до|и)\s*(?:до\s*)?(\d{1,2})(?:\s*[:.ч]\s*(\d{1,2}))?\s*(?:мин)?/gi;
             let m;
-            while ((m = timeRegex.exec(seg)) !== null) {
-                const startH = parseInt(m[1]);
-                const startM = m[2] ? parseInt(m[2]) : 0;
-                const endH = parseInt(m[3]);
-                const endM = m[4] ? parseInt(m[4]) : 0;
+            let timeFound = false;
 
-                // Валидация: часы 0-24, минуты 0-59. Игнорируем подозрительные данные (например, номера телефонов).
-                if (startH > 24 || startM > 59 || endH > 24 || endM > 59) continue;
-
-                const interval = { start: startH * 60 + startM, end: endH * 60 + endM };
+            // 1. Ультра-пермиссивный поиск: "08:00 - 20:00", "08.00-20.00", "8-20" и т.д.
+            // Ищем две группы цифр (H[:m]), разделенные чем-угодно не-цифровым
+            const simpleMatch = cleanSeg.match(/(\d{1,2})[:.](\d{1,2})\s*\D+\s*(\d{1,2})[:.](\d{1,2})/);
+            if (simpleMatch) {
+                timeFound = true;
+                const interval = {
+                    start: parseInt(simpleMatch[1]) * 60 + parseInt(simpleMatch[2]),
+                    end: parseInt(simpleMatch[3]) * 60 + parseInt(simpleMatch[4])
+                };
                 if (isBreak && !isGasSale) breakIntervals.push(interval);
-                else workingIntervals.push(interval);
+                else {
+                    workingIntervals.push(interval);
+                    hasAnyWorkDayData = true;
+                }
+            } else {
+                // 2. Стандартный поиск (для случаев с буквами "с", "до" и т.д.)
+                while ((m = timeRegex.exec(cleanSeg)) !== null) {
+                    const startH = parseInt(m[1]);
+                    const startM = m[2] ? parseInt(m[2]) : 0;
+                    const endH = parseInt(m[3]);
+                    const endM = m[4] ? parseInt(m[4]) : 0;
+                    if (startH > 24 || startM > 59 || endH > 24 || endM > 59) continue;
+
+                    timeFound = true;
+                    const interval = { start: startH * 60 + startM, end: endH * 60 + endM };
+                    if (isBreak && !isGasSale) breakIntervals.push(interval);
+                    else {
+                        workingIntervals.push(interval);
+                        hasAnyWorkDayData = true;
+                    }
+                }
             }
+
+            // 3. Если время всё ещё не нашли — ищем хотя бы просто часы (8-20)
+            if (!timeFound) {
+                const shortMatch = cleanSeg.match(/(?<![\d:])(\d{1,2})\s*-\s*(\d{1,2})(?![\d:])/);
+                if (shortMatch) {
+                    timeFound = true;
+                    const interval = { start: parseInt(shortMatch[1]) * 60, end: parseInt(shortMatch[2]) * 60 };
+                    if (isBreak && !isGasSale) breakIntervals.push(interval);
+                    else {
+                        workingIntervals.push(interval);
+                        hasAnyWorkDayData = true;
+                    }
+                }
+            }
+
+            if (!timeFound && /(?:выходн|не работает|закрыт)/i.test(cleanSeg)) {
+                explicitlyClosedToday = true;
+                workingIntervals = [];
+                breakIntervals = [];
+                hasAnyWorkDayData = true;
+            }
+        } else if (hasDayMarker) {
+            hasAnyWorkDayData = true;
         }
 
     });
 
-    // Финальная проверка статуса
+    // === DEBUG LOG ===
+    const debugId = p.nameClean || 'Station';
+    console.log(`[Status] ${debugId} | Norm: ${schedule} | Work:`, workingIntervals);
     for (const b of breakIntervals) {
         if (absMins >= b.start && absMins < b.end) return 'break';
     }
@@ -859,17 +1105,10 @@ function getStationStatus(feature) {
     }
 
     if (isAlways) return 'always';
+    if (explicitlyClosedToday) return 'closed';
 
-    if (workingIntervals.length > 0) {
-        for (const w of workingIntervals) {
-            if (w.end > w.start) {
-                if (absMins >= w.start && absMins < w.end) return 'open';
-            } else { // Переход через полночь
-                if (absMins >= w.start || absMins < w.end) return 'open';
-            }
-        }
-        return 'closed';
-    }
+    // Если есть данные о рабочих часах в другие дни, значит сегодня закрыто
+    if (hasAnyWorkDayData) return 'closed';
 
     return 'no_data';
 }
@@ -945,6 +1184,7 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
 
     const statusMap = {
         'vremenno': { text: 'Временно не работает', color: '#c62828', icon: '❌' },
+        'permit': { text: 'Въезд по пропускам', color: '#424242', icon: '🪪' },
         'break': { text: 'Технический перерыв', color: '#ef6c00', icon: '🛠️' },
         'closed': { text: 'Закрыто сейчас', color: '#757575', icon: '🕒' },
         'open': { text: 'Открыто сейчас', color: '#2e7d32', icon: '🟢' },
@@ -970,8 +1210,23 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
         if (p.addressClean) {
             html += `<div class="station-info-row"><b>Адрес:</b> ${p.addressClean}</div>`;
         }
-        if (p.scheduleClean) {
-            const prettySchedule = cleanScheduleText(p.scheduleClean);
+
+        let schedule = p.scheduleClean || '';
+        // Если поле "режим работы" на самом деле содержит телефон
+        const phoneRegex = /(?:тел\.?|т\.|phone|контакты):?\s*([\d\s\(\)-]{7,})/i;
+        const phoneMatch = schedule.match(phoneRegex);
+
+        if (phoneMatch) {
+            const phoneStr = phoneMatch[0];
+            html += `<div class="station-info-row"><b>Телефон:</b> ${phoneStr}</div>`;
+            // Убираем телефон из строки расписания для вывода
+            schedule = schedule.replace(phoneStr, '').trim();
+            // Убираем лишние точки/запятые в конце
+            schedule = schedule.replace(/^[;,\s\.]+|[;,\s\.]+$/g, '');
+        }
+
+        if (schedule && schedule.length > 3) {
+            const prettySchedule = cleanScheduleText(schedule);
             html += `<div class="station-info-row"><b>Режим работы:</b> ${prettySchedule}</div>`;
         }
     }
@@ -1127,13 +1382,28 @@ async function loadGuide() {
 // --- РАБОТА С ОТЗЫВАМИ ---
 
 async function fetchComments() {
+    if (!supabaseClient) return;
+
     try {
-        const res = await fetch('api/comments');
-        if (res.ok) {
-            userComments = await res.json();
+        const { data, error } = await supabaseClient
+            .from('comments')
+            .select('*');
+
+        if (!error && data) {
+            userComments = {};
+            data.forEach(c => {
+                if (!userComments[c.station_id]) userComments[c.station_id] = [];
+                userComments[c.station_id].push({
+                    text: c.text,
+                    date: c.date
+                });
+            });
+            console.log('Comments loaded from Supabase');
+        } else if (error) {
+            console.warn('Supabase fetch error:', error);
         }
     } catch (e) {
-        console.error('Ошибка загрузки отзывов:', e);
+        console.error('Supabase exception:', e);
     }
 }
 
@@ -1162,21 +1432,23 @@ async function onCommentSubmit(stationId) {
     const text = input.value.trim();
     if (!text) return;
 
-    try {
-        const response = await fetch('api/comments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stationId, text })
-        });
+    if (!supabaseClient) {
+        alert('Система отзывов не настроена (отсутствуют ключи Supabase).');
+        return;
+    }
 
-        if (response.ok) {
+    const now = new Date();
+    const dateStr = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    try {
+        const { error } = await supabaseClient
+            .from('comments')
+            .insert([{ station_id: String(stationId), text, date: dateStr }]);
+
+        if (!error) {
             input.value = '';
             // Локально обновляем данные для мгновенного отображения
             if (!userComments[stationId]) userComments[stationId] = [];
-
-            const now = new Date();
-            const dateStr = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
             userComments[stationId].push({ text, date: dateStr });
 
             // Перерисовываем список отзывов
@@ -1185,12 +1457,14 @@ async function onCommentSubmit(stationId) {
 
             // Скрываем форму обратно
             toggleCommentForm(stationId);
+            console.log('Comment saved to Supabase');
         } else {
-            alert('Не удалось отправить отзыв. Попробуйте позже.');
+            console.error('Supabase insert error:', error);
+            alert('Не удалось отправить отзыв. Проверьте настройки базы данных.');
         }
     } catch (e) {
-        console.error('Ошибка отправки отзыва:', e);
-        alert('Ошибка сети.');
+        console.error('Supabase insert exception:', e);
+        alert('Ошибка сети при отправке отзыва.');
     }
 }
 

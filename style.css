@@ -1061,7 +1061,11 @@ input[type="range"] {
 }
 
 .marker-vremenno {
-    background-color: #DB534B;
+    background-color: var(--color-danger);
+}
+
+.marker-permit {
+    background-color: #424242;
 }
 
 .marker-no-data {
