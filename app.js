@@ -302,7 +302,9 @@ async function loadStations() {
 
         const nameClean = baseName;
         const addressClean = stripHtml((el.address || '').replace(/^Временно не работает \((.+)\)$/, '$1'));
-        const scheduleClean = el.schedule || '';
+        const scheduleRaw = el.schedule || '';
+        // Игнорируем значения вида «2021» (год открытия, а не расписание)
+        const scheduleClean = /^\s*20\d{2}\s*$/.test(scheduleRaw) ? '' : scheduleRaw;
 
         let isClosed = false;
         if (scheduleClean.includes('Временно не работает') || (el.status && el.status.toLowerCase().includes('закрыта'))) {
@@ -936,6 +938,9 @@ function getStationStatus(feature) {
     let schedule = p.scheduleClean ? p.scheduleClean.toLowerCase() : '';
     if (!schedule) return 'no_data';
 
+    // Проверяем круглосуточность ДО нормализации, т.к. «24ч» потом превратится в «24:00»
+    const isAlways = /круглосуточно|24\s*\/?\s*7|24\s*[чh]/i.test(schedule);
+
     // Нормализация дней недели
     schedule = schedule
         .replace(/понедельник[а-я]*/g, 'пн')
@@ -957,14 +962,8 @@ function getStationStatus(feature) {
         }) // 9 вечера -> 21:00
         .replace(/(\d{1,2})\s*-\s*(\d{1,2})\s*ч/gi, '$1:00-$2:00') // 8-20ч -> 8:00-20:00
         .replace(/(\d{1,2})\s*ч/gi, '$1:00') // 20ч -> 20:00
-        .replace(/\b(\d{1,2})\s*-\s*(\d{1,2})\b/g, (match, h1, h2) => {
-            // Только если это не часть другого формата времени и не диапазон дат
-            return h1 + ':00-' + h2 + ':00';
-        })
-        .replace(/(\d{1,2})\s*(?:-)\s*(\d{2})(?!\d)/g, '$1:$2') // 21-30 -> 21:30
         .replace(/\s+и\s+до\b/gi, '-');
 
-    const isAlways = /круглосуточно|24\s*\/?\s*7|24\s*[чh]/i.test(schedule);
     const segments = schedule.split(/[;\n]\s*/);
 
     let workingIntervals = [];
@@ -1027,22 +1026,26 @@ function getStationStatus(feature) {
             let m;
             let timeFound = false;
 
-            // 1. Ультра-пермиссивный поиск: "08:00 - 20:00", "08.00-20.00", "8-20" и т.д.
-            // Ищем две группы цифр (H[:m]), разделенные чем-угодно не-цифровым
-            const simpleMatch = cleanSeg.match(/(\d{1,2})[:.](\d{1,2})\s*\D+\s*(\d{1,2})[:.](\d{1,2})/);
-            if (simpleMatch) {
+            // Глобальный поиск всех временных интервалов: 08:00-20:00, 08.00-20.00, 8-20, «с 8 до 20» и т.д.
+            // Юатчет форматы: H:MM, H.MM, H (goal: экстракция пары start-end без предварительной нормализации)
+            // Группа 1/2 = start hour/min, Группа 3/4 = end hour/min
+            const simpleRegex = /(\d{1,2})(?:[:](\d{2})|[.](\d{2}))?\s*(?:-|—|–|−|\s+(?:до|по)\s+)\s*(\d{1,2})(?:[:](\d{2})|[.](\d{2}))?/g;
+            let simpleM;
+            while ((simpleM = simpleRegex.exec(cleanSeg)) !== null) {
+                const sh = parseInt(simpleM[1]);
+                const sm = parseInt(simpleM[2] || simpleM[3] || '0');
+                const eh = parseInt(simpleM[4]);
+                const em = parseInt(simpleM[5] || simpleM[6] || '0');
+                if (sh > 24 || sm > 59 || eh > 24 || em > 59) continue;
+                if (sh === eh && sm === em) continue;
                 timeFound = true;
-                const interval = {
-                    start: parseInt(simpleMatch[1]) * 60 + parseInt(simpleMatch[2]),
-                    end: parseInt(simpleMatch[3]) * 60 + parseInt(simpleMatch[4])
-                };
+                const interval = { start: sh * 60 + sm, end: eh * 60 + em };
                 if (isBreak && !isGasSale) breakIntervals.push(interval);
-                else {
-                    workingIntervals.push(interval);
-                    hasAnyWorkDayData = true;
-                }
-            } else {
-                // 2. Стандартный поиск (для случаев с буквами "с", "до" и т.д.)
+                else { workingIntervals.push(interval); hasAnyWorkDayData = true; }
+            }
+
+            if (!timeFound) {
+                // Фолбэк: стандартный поиск с буквами «с», «до»
                 while ((m = timeRegex.exec(cleanSeg)) !== null) {
                     const startH = parseInt(m[1]);
                     const startM = m[2] ? parseInt(m[2]) : 0;
@@ -1052,20 +1055,6 @@ function getStationStatus(feature) {
 
                     timeFound = true;
                     const interval = { start: startH * 60 + startM, end: endH * 60 + endM };
-                    if (isBreak && !isGasSale) breakIntervals.push(interval);
-                    else {
-                        workingIntervals.push(interval);
-                        hasAnyWorkDayData = true;
-                    }
-                }
-            }
-
-            // 3. Если время всё ещё не нашли — ищем хотя бы просто часы (8-20)
-            if (!timeFound) {
-                const shortMatch = cleanSeg.match(/(?<![\d:])(\d{1,2})\s*-\s*(\d{1,2})(?![\d:])/);
-                if (shortMatch) {
-                    timeFound = true;
-                    const interval = { start: parseInt(shortMatch[1]) * 60, end: parseInt(shortMatch[2]) * 60 };
                     if (isBreak && !isGasSale) breakIntervals.push(interval);
                     else {
                         workingIntervals.push(interval);
@@ -1153,10 +1142,14 @@ function cleanScheduleText(text) {
         let s = seg.trim();
         if (!s) return '';
 
-        // 1. Проверяем, не является ли сегмент просто набором цифр (телефоном)
+        // 1. Проверяем, не является ли сегмент просто набором цифр (телефоном) или годом
         const digits = s.replace(/\D/g, '');
         // Если цифр много (7+) и нет признаков времени (двоеточие или " - ") — это шум.
         if (digits.length >= 7 && !s.includes(':') && !s.includes(' - ')) {
+            return '';
+        }
+        // Если сегмент — просто год вида «2021» — игнорируем
+        if (/^\s*20\d{2}\s*$/.test(s)) {
             return '';
         }
 
