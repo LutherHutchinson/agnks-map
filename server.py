@@ -2,7 +2,7 @@ import http.server
 import json
 import os
 import datetime
-import update_agnks_ru
+
 from urllib.parse import urlparse, parse_qs
 
 PORT = 8080
@@ -60,37 +60,6 @@ def fetch_gazprom_data():
                 pass
         return json.dumps({"error": str(e)}), False
 
-def fetch_agnks_ru_data():
-    import time
-    cache_file = 'agnks_ru.json'
-    ttl = 3600
-
-    if os.path.exists(cache_file):
-        mtime = os.path.getmtime(cache_file)
-        if time.time() - mtime < ttl:
-            try:
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    return f.read(), True
-            except:
-                pass
-
-    # fetch fresh
-    success = update_agnks_ru.fetch_and_parse()
-    if success and os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                return f.read(), True
-        except:
-            pass
-
-    # fallback
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                return f.read(), True
-        except:
-            pass
-    return json.dumps({"error": "Failed to fetch agnks.ru data"}), False
 
 class MyHandler(http.server.SimpleHTTPRequestHandler):
     def get_suggest_key(self):
@@ -110,21 +79,11 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
     def fetch_gazprom_stations(self):
         return fetch_gazprom_data()
 
-    def fetch_agnks_ru_stations(self):
-        return fetch_agnks_ru_data()
 
     def do_GET(self):
         parsed_path = urlparse(self.path)
         if parsed_path.path == '/api/gazprom_stations':
             data, success = self.fetch_gazprom_stations()
-            self.send_response(200 if success else 500)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Cache-Control', f'max-age={GAZPROM_CACHE_TTL}')
-            self.end_headers()
-            self.wfile.write(data.encode('utf-8'))
-        elif parsed_path.path == '/api/agnks_ru_stations':
-            data, success = self.fetch_agnks_ru_stations()
             self.send_response(200 if success else 500)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -170,11 +129,6 @@ def background_updater():
             fetch_gazprom_data()
         except Exception as e:
             print(f"Background update error (Gazprom): {e}")
-            
-        try:
-            fetch_agnks_ru_data()
-        except Exception as e:
-            print(f"Background update error (Agnks Ru): {e}")
             
         time.sleep(GAZPROM_CACHE_TTL)
 

@@ -95,29 +95,21 @@ async function init() {
 async function loadStations() {
     setStatus('Загрузка базы станций…');
 
-    let gazpromData = [], agnksRuData = [], allData = [];
+    let gazpromData = [], allData = [];
     try {
         // Пробуем загрузить актуальные данные через прокси
         let resGazprom = await fetch('api/gazprom_stations').catch(() => null);
-        let resAgnksRu = await fetch('api/agnks_ru_stations').catch(() => null);
 
         // Если прокси не ответил
         if (!resGazprom || !resGazprom.ok) {
             console.warn('Dynamic Gazprom API failed, falling back to static file');
             resGazprom = await fetch(`gazprom_stations.json?t=${Date.now()}`).catch(() => null);
         }
-        if (!resAgnksRu || !resAgnksRu.ok) {
-            console.warn('Dynamic AgnksRu API failed, falling back to static file');
-            resAgnksRu = await fetch(`agnks_ru.json?t=${Date.now()}`).catch(() => null);
-        }
 
         const resAll = await fetch('stations.json').catch(() => null);
 
         if (resGazprom && resGazprom.ok) {
             try { gazpromData = await resGazprom.json(); } catch (e) { }
-        }
-        if (resAgnksRu && resAgnksRu.ok) {
-            try { agnksRuData = await resAgnksRu.json(); } catch (e) { }
         }
         if (resAll && resAll.ok) {
             try { allData = await resAll.json(); } catch (e) { }
@@ -127,9 +119,8 @@ async function loadStations() {
     }
 
     const itemsGazprom = gazpromData && gazpromData.elements ? gazpromData.elements : (Array.isArray(gazpromData) ? gazpromData : []);
-    const itemsAgnksRu = Array.isArray(agnksRuData) ? agnksRuData : [];
     const itemsAll = Array.isArray(allData) ? allData : [];
-    console.log(`[Stations] Loaded ${itemsGazprom.length} Gazprom, ${itemsAgnksRu.length} AgnksRu, ${itemsAll.length} primary.`);
+    console.log(`[Stations] Loaded ${itemsGazprom.length} Gazprom, ${itemsAll.length} primary.`);
 
     const tolerance = 0.01;
     const processedPosIds = new Set();
@@ -161,37 +152,6 @@ async function loadStations() {
         }
     });
 
-    // 2. Затем парсим заправки agnks.ru (Приоритет 2)
-    itemsAgnksRu.forEach(function (item) {
-        if (item.lat && item.lon) {
-            const parsed = parseAgnksRuStation(item);
-            if (!parsed) return;
-
-            const name = parsed.properties.nameClean;
-            const posId = extractPosId(name);
-            if (posId && processedPosIds.has(posId)) return; // Дубликат по POS ID
-
-            const normName = normalizeName(name);
-            const [latNew, lonNew] = parsed.geometry.coordinates;
-
-            // Проверка по имени и близости (если координаты не совсем совпадают)
-            if (processedNames.has(normName)) {
-                const [latE, lonE] = processedNames.get(normName);
-                if (Math.abs(latE - latNew) < 0.1 && Math.abs(lonE - lonNew) < 0.1) return;
-            }
-
-            const isDuplicate = allFeatures.some(existing => {
-                const [latE, lonE] = existing.geometry.coordinates;
-                return Math.abs(latE - latNew) < tolerance && Math.abs(lonE - lonNew) < tolerance;
-            });
-
-            if (!isDuplicate) {
-                allFeatures.push(parsed);
-                if (posId) processedPosIds.add(posId);
-                processedNames.set(normName, [latNew, lonNew]);
-            }
-        }
-    });
 
     // 3. Затем парсим общую базу stations.json (Приоритет 3)
     itemsAll.forEach(function (item) {
@@ -282,60 +242,6 @@ async function loadStations() {
         };
     }
 
-    // Парсинг данных agnks.ru
-    function parseAgnksRuStation(el) {
-        const coords = [el.lat, el.lon];
-        if (isNaN(coords[0]) || isNaN(coords[1])) return null;
-
-        // Фильтруем строящиеся и планируемые АГНКС
-        const statusStr = (el.status || '').toLowerCase();
-        const scheduleStr = (el.schedule || '').toLowerCase();
-        const addressStr = (el.address || '').toLowerCase();
-        const brandStr = (el.brand || '').toLowerCase();
-        const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен|в\s*плане/i;
-
-        if (constructionKeywords.test(statusStr) || constructionKeywords.test(scheduleStr) || constructionKeywords.test(addressStr) || constructionKeywords.test(brandStr)) {
-            return null;
-        }
-
-        let baseName = stripHtml(el.brand || 'АГНКС').replace(/^Временно не работает \((.+)\)$/, '$1');
-
-        const nameClean = baseName;
-        const addressClean = stripHtml((el.address || '').replace(/^Временно не работает \((.+)\)$/, '$1'));
-        const scheduleRaw = el.schedule || '';
-        // Игнорируем значения вида «2021» (год открытия, а не расписание)
-        const scheduleClean = /^\s*20\d{2}\s*$/.test(scheduleRaw) ? '' : scheduleRaw;
-
-        let isClosed = false;
-        if (scheduleClean.includes('Временно не работает') || (el.status && el.status.toLowerCase().includes('закрыта'))) {
-            isClosed = true;
-        }
-
-        return {
-            type: 'Feature',
-            id: 'agnks_' + Math.random().toString(36).substr(2, 9),
-            geometry: {
-                type: 'Point',
-                coordinates: coords
-            },
-            properties: {
-                nameClean,
-                addressClean,
-                scheduleClean,
-                phoneClean: el.phone || '',
-                isClosed: isClosed,
-                closeStatus: isClosed ? "0" : "1",
-                clusterCaption: nameClean,
-                hintContent: nameClean,
-                rawCoords: coords,
-                amenities: {
-                    around_the_clock: /круглосуточно|24\/7|24ч/i.test(scheduleClean),
-                    cng: true
-                },
-                updatedAt: new Date().toISOString()
-            }
-        };
-    }
 
     // Нормализация данных стандартной станции
     function parseStation(item) {
@@ -350,11 +256,11 @@ async function loadStations() {
         const bodyClean = stripHtml(rawBody);
 
         const lines = bodyClean.split('\n')
-            .map(s => s.replace(/^(?:адрес|режим\s*(?:работы|раб)|тел(?:ефон)?|факс)\s*[:.-]?\s*/iu, '').trim())
+            .map(s => s.replace(/^(?:адрес|режим\s*(?:работы|раб)|тел(?:ефон)?|факс|т)\s*[:.-]?\s*/iu, '').trim())
             .filter(Boolean);
 
-        const phoneRegex = /(\+7|8\s*[\(\-]?\d{3}|\бтел\b|факс)/i;
-        const scheduleRegex = /\d{1,2}[:.\-\s]\d{2}|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв/iu;
+        const phoneRegex = /(\+7|8\s*[\(\-]?\d{3}|\bтел\b|\bт\.\s*\(|\bфакс\b)/i;
+        const scheduleRegex = /\b\d{1,2}[:. ][0-5]\d\b|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв|временно не работает|закрыт/iu;
 
         // Фильтруем строящиеся/планируемые (проверяем все поля)
         const headerRaw = item.properties.balloonContentHeader || '';
@@ -1026,16 +932,15 @@ function getStationStatus(feature) {
             let m;
             let timeFound = false;
 
-            // Глобальный поиск всех временных интервалов: 08:00-20:00, 08.00-20.00, 8-20, «с 8 до 20» и т.д.
-            // Юатчет форматы: H:MM, H.MM, H (goal: экстракция пары start-end без предварительной нормализации)
-            // Группа 1/2 = start hour/min, Группа 3/4 = end hour/min
-            const simpleRegex = /(\d{1,2})(?:[:](\d{2})|[.](\d{2}))?\s*(?:-|—|–|−|\s+(?:до|по)\s+)\s*(\d{1,2})(?:[:](\d{2})|[.](\d{2}))?/g;
+            // Глобальный поиск всех временных интервалов: 08:00-20:00, 08.00-20.00, 8 00-20 00, 8-20, «с 8 до 20» и т.д.
+            // Группы: 1=startH, 2=startM(:), 3=startM(.), 4=startM(space), 5=endH, 6=endM(:), 7=endM(.), 8=endM(space)
+            const simpleRegex = /\b(\d{1,2})(?:[:](\d{2})|[.](\d{2})|[ ]([0-5]\d))?\s*(?:-|—|–|−|\s+(?:до|по)\s+)\s*(\d{1,2})(?:[:](\d{2})|[.](\d{2})|[ ]([0-5]\d))?\b/g;
             let simpleM;
             while ((simpleM = simpleRegex.exec(cleanSeg)) !== null) {
                 const sh = parseInt(simpleM[1]);
-                const sm = parseInt(simpleM[2] || simpleM[3] || '0');
-                const eh = parseInt(simpleM[4]);
-                const em = parseInt(simpleM[5] || simpleM[6] || '0');
+                const sm = parseInt(simpleM[2] || simpleM[3] || simpleM[4] || '0');
+                const eh = parseInt(simpleM[5]);
+                const em = parseInt(simpleM[6] || simpleM[7] || simpleM[8] || '0');
                 if (sh > 24 || sm > 59 || eh > 24 || em > 59) continue;
                 if (sh === eh && sm === em) continue;
                 timeFound = true;
@@ -1187,11 +1092,48 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const s = statusMap[p.timeStatus || 'no_data'];
     html += `<div style="color:${s.color}; font-weight:bold; font-size:12px; margin-top:4px;">${s.icon} ${s.text}</div>`;
 
+    let address = p.addressClean || '';
+    let schedule = p.scheduleClean || '';
+    let phone = p.phoneClean || '';
+
+    const combinedPhoneRegex = /(?:(?:тел\.?|т\.|phone|контакты):?\s*[\d\s\(\)+-]{7,})|(?:\([\d\s]{3,7}\)\s*[\d\s-]{5,12})|(?:\+7[\d\s\(\)-]{10,20})|(?:\b8\s*(?=(?:[\s\(\)-]*\d){10,11}\b)[\d\s\(\)-]{10,22})/gi;
+
+    // Функция для очистки адреса/расписания от найденного телефона и его префиксов
+    function cleanField(text, found) {
+        if (!text || !found) return text;
+        return text.replace(found, '')
+            .replace(/[,;\s\.]*(?:тел\.?|т\.|phone|контакты)[:\-]?\s*$/i, '') // Убираем висящий префикс в конце
+            .replace(/^[;,\s\.]+|[;,\s\.]+$/g, '') // Убираем мусор по краям
+            .trim();
+    }
+
+    // Извлекаем все телефоны
+    const phonesInAddress = address.match(combinedPhoneRegex) || [];
+    phonesInAddress.forEach(found => {
+        if (!phone.includes(found)) {
+            phone = phone ? phone + '; ' + found : found;
+        }
+        address = cleanField(address, found);
+    });
+
+    const phonesInSchedule = schedule.match(combinedPhoneRegex) || [];
+    phonesInSchedule.forEach(found => {
+        if (!phone.includes(found)) {
+            phone = phone ? phone + '; ' + found : found;
+        }
+        schedule = cleanField(schedule, found);
+    });
+
     if (p.gazpromUrl !== undefined) {
         // Газпромовская заправка — структурированный формат
-        html += `<div class="station-info-row"><b>Адрес:</b> ${p.addressClean}</div>`;
-        if (p.scheduleClean) {
-            const prettySchedule = cleanScheduleText(p.scheduleClean);
+        if (address) {
+            html += `<div class="station-info-row"><b>Адрес:</b> ${address}</div>`;
+        }
+        if (phone) {
+            html += `<div class="station-info-row"><b>Телефон:</b> ${phone}</div>`;
+        }
+        if (schedule) {
+            const prettySchedule = cleanScheduleText(schedule);
             html += `<div class="station-info-row"><b>Режим работы:</b> ${prettySchedule}</div>`;
         }
         const amenityBadges = buildAmenitiesHtml(p.amenities || {}, p.timeStatus);
@@ -1200,22 +1142,11 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
         }
     } else {
         // Обычная заправка — адрес, расписание, телефон
-        if (p.addressClean) {
-            html += `<div class="station-info-row"><b>Адрес:</b> ${p.addressClean}</div>`;
+        if (address) {
+            html += `<div class="station-info-row"><b>Адрес:</b> ${address}</div>`;
         }
-
-        let schedule = p.scheduleClean || '';
-        // Если поле "режим работы" на самом деле содержит телефон
-        const phoneRegex = /(?:тел\.?|т\.|phone|контакты):?\s*([\d\s\(\)-]{7,})/i;
-        const phoneMatch = schedule.match(phoneRegex);
-
-        if (phoneMatch) {
-            const phoneStr = phoneMatch[0];
-            html += `<div class="station-info-row"><b>Телефон:</b> ${phoneStr}</div>`;
-            // Убираем телефон из строки расписания для вывода
-            schedule = schedule.replace(phoneStr, '').trim();
-            // Убираем лишние точки/запятые в конце
-            schedule = schedule.replace(/^[;,\s\.]+|[;,\s\.]+$/g, '');
+        if (phone) {
+            html += `<div class="station-info-row"><b>Телефон:</b> ${phone}</div>`;
         }
 
         if (schedule && schedule.length > 3) {
