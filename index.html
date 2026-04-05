@@ -33,17 +33,28 @@
     <div id="controls">
         <h3>Планировщик АГНКС</h3>
 
+        <!-- Поиск одного города -->
+        <div class="city-search-group">
+            <div class="input-wrapper">
+                <input type="text" id="city-search" placeholder="Поиск города">
+                <button id="my-loc-city" class="my-loc-btn" title="Моё местоположение">📍</button>
+                <button id="btn-city-search" class="search-btn-icon" title="Найти">🔍</button>
+            </div>
+        </div>
+
+        <div class="search-divider">или проложить маршрут:</div>
+
         <!-- Ввод маршрута -->
         <div class="route-inputs">
             <div class="input-wrapper">
-                <input type="text" id="route-from" placeholder="Откуда (например: Элиста)">
+                <input type="text" id="route-from" placeholder="Откуда">
                 <button id="my-loc-from" class="my-loc-btn" title="Моё местоположение">📍</button>
             </div>
 
             <button id="swap-locations" class="swap-btn" title="Поменять местами">⇅</button>
 
             <div class="input-wrapper">
-                <input type="text" id="route-to" placeholder="Куда (например: Краснодар)">
+                <input type="text" id="route-to" placeholder="Куда">
                 <button id="my-loc-to" class="my-loc-btn" title="Моё местоположение">📍</button>
             </div>
         </div>

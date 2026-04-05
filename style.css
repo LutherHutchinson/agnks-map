@@ -140,6 +140,42 @@ button {
     font-size: 14px;
 }
 
+.search-divider {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    font-size: 11px;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 4px 0 16px;
+}
+
+.search-divider::before,
+.search-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #eee;
+}
+
+.search-divider::before {
+    margin-right: 15px;
+}
+
+.search-divider::after {
+    margin-left: 15px;
+}
+
+.search-btn-icon {
+    width: auto !important;
+    min-width: 44px;
+    padding: 10px 12px !important;
+    background-color: var(--color-accent) !important;
+    font-size: 16px !important;
+    flex-shrink: 0;
+}
+
 .route-inputs {
     position: relative;
     display: flex;

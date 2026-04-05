@@ -84,6 +84,7 @@ async function init() {
     await loadStations();
 
     // Подсказки при вводе адресов
+    initCustomSuggest('city-search');
     initCustomSuggest('route-from');
     initCustomSuggest('route-to');
 
@@ -333,7 +334,14 @@ function bindUIEvents() {
 
     document.getElementById('build-route').addEventListener('click', onBuildRouteClick);
     document.getElementById('reset-route').addEventListener('click', resetRoute);
+    document.getElementById('btn-city-search').addEventListener('click', onCitySearchClick);
 
+    // Поиск при нажатии Enter в поле города
+    document.getElementById('city-search').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') onCitySearchClick();
+    });
+
+    document.getElementById('my-loc-city').addEventListener('click', () => useMyLocation('city-search'));
     document.getElementById('my-loc-from').addEventListener('click', () => useMyLocation('route-from'));
     document.getElementById('my-loc-to').addEventListener('click', () => useMyLocation('route-to'));
 
@@ -456,10 +464,47 @@ function onBuildRouteClick() {
     const toInput = document.getElementById('route-to').value.trim();
 
     if (!fromInput || !toInput) {
-        alert('Заполните поля «Откуда» и «Куда»');
+        setStatus('Укажите оба пункта (Откуда и Куда)');
         return;
     }
 
+    // Если пользователь нажал проложить маршрут, а заполнено только поле Откуда — 
+    // возможно он просто хочет найти этот город, если поле Куда пустое.
+    // Но мы добавили отдельный поиск, так что просто просим оба поля.
+
+    onBuildRoute(fromInput, toInput);
+}
+
+/** Поиск и переход к городу */
+async function onCitySearchClick() {
+    const cityInput = document.getElementById('city-search');
+    const query = cityInput.value.trim();
+    if (!query) {
+        setStatus('Введите название города');
+        return;
+    }
+
+    setStatus('Поиск города…');
+    try {
+        const res = await ymaps.geocode(query, { results: 1 });
+        const obj = res.geoObjects.get(0);
+        if (obj) {
+            const coords = obj.geometry.getCoordinates();
+            myMap.setCenter(coords, 10);
+            setStatus(`Карта центрирована на: ${query}`);
+
+            // Если была проложена подсказка — убираем её
+            if (typeof hideSuggestions === 'function') hideSuggestions();
+        } else {
+            setStatus('Город не найден');
+        }
+    } catch (e) {
+        console.error('Geocode error:', e);
+        setStatus('Ошибка при поиске города');
+    }
+}
+
+function onBuildRoute(fromInput, toInput) {
     setStatus('Геокодирование адресов...');
 
     Promise.all([
@@ -1561,7 +1606,7 @@ function renderSuggestions(items, input, container) {
 
     // Добавляем классы для эффекта "выпадения"
     input.classList.add('input-with-suggestions');
-    const btn = input.parentNode.querySelector('.my-loc-btn');
+    const btn = input.parentNode.querySelector('.my-loc-btn') || input.parentNode.querySelector('.search-btn-icon');
     if (btn) btn.classList.add('btn-with-suggestions');
 
     // Позиционируем относительно .input-wrapper (который position: relative)
