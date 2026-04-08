@@ -260,8 +260,9 @@ async function loadStations() {
             .map(s => s.replace(/^(?:адрес|режим\s*(?:работы|раб)|тел(?:ефон)?|факс|т)\s*[:.-]?\s*/iu, '').trim())
             .filter(Boolean);
 
-        const phoneRegex = /(\+7|8\s*[\(\-]?\d{3}|\bтел\b|\bт\.\s*\(|\bфакс\b)/i;
-        const scheduleRegex = /\b\d{1,2}[:. ][0-5]\d\b|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв|временно не работает|закрыт/iu;
+        const phoneRegex = /(?:\+7|8\s*[\(\-]?\d{3}|\bтел\.?|\bт\.\s*\(|\bфакс\b|\b8\s*\(\d{3,5}\))/i;
+        const permitRegex = /по\s*пропускам|пропускной\s*режим|спецпропуск|сотрудников\s*комбината|по\s*договору|только\s*для\s*юрлиц|только\s*служебн[а-я]*/i;
+        const scheduleRegex = /\b\d{1,2}[:.][0-5]\d\b|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв|временно не работает|закрыт/iu;
 
         // Фильтруем строящиеся/планируемые (проверяем все поля)
         const headerRaw = item.properties.balloonContentHeader || '';
@@ -275,7 +276,19 @@ async function loadStations() {
         const addressLines = [], scheduleLines = [], phoneLines = [];
 
         for (const line of lines) {
-            if (phoneRegex.test(line)) {
+            if (permitRegex.test(line)) {
+                // Если в строке с пропуском есть еще и часы работы, попробуем разделить
+                if (scheduleRegex.test(line) && line.includes('.')) {
+                    const parts = line.split(/[\.]\s+/);
+                    parts.forEach(p => {
+                        if (permitRegex.test(p)) addressLines.push(p);
+                        else if (scheduleRegex.test(p)) scheduleLines.push(p);
+                        else addressLines.push(p);
+                    });
+                } else {
+                    addressLines.push(line);
+                }
+            } else if (phoneRegex.test(line)) {
                 phoneLines.push(line);
             } else if (scheduleRegex.test(line)) {
                 scheduleLines.push(line);
@@ -894,6 +907,7 @@ function getStationStatus(feature) {
 
     // Нормализация дней недели
     schedule = schedule
+        .replace(/без\s+выходных?/gi, 'ежедневно')
         .replace(/понедельник[а-я]*/g, 'пн')
         .replace(/вторник[а-я]*/g, 'вт')
         .replace(/сред[ауы][а-я]*/g, 'ср')
@@ -1027,7 +1041,7 @@ function getStationStatus(feature) {
 
     // === DEBUG LOG ===
     const debugId = p.nameClean || 'Station';
-    console.log(`[Status] ${debugId} | Norm: ${schedule} | Work:`, workingIntervals);
+    console.log(`[Status] ${debugId} | Raw: ${p.scheduleClean} | Norm: ${schedule} | Work:`, workingIntervals, " | Day:", dayToday, " | Mins:", absMins);
     for (const b of breakIntervals) {
         if (absMins >= b.start && absMins < b.end) return 'break';
     }
