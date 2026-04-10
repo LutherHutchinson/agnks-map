@@ -1108,8 +1108,9 @@ function cleanScheduleText(text) {
 
         // 1. Проверяем, не является ли сегмент просто набором цифр (телефоном) или годом
         const digits = s.replace(/\D/g, '');
-        // Если цифр много (7+) и нет признаков времени (двоеточие или " - ") — это шум.
-        if (digits.length >= 7 && !s.includes(':') && !s.includes(' - ')) {
+        // Если цифр много (7+) и нет признаков времени (двоеточие, " - " или сочетание ч и м) — это шум.
+        const isTimePattern = s.includes(':') || s.includes(' - ') || /\d{1,2}ч\d{2}м/i.test(s);
+        if (digits.length >= 7 && !isTimePattern) {
             return '';
         }
         // Если сегмент — просто год вида «2021» — игнорируем
@@ -1137,7 +1138,8 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const placeLink = `https://yandex.ru/maps/?text=${latS},${lonS}`;
 
     const p = feature.properties;
-    let html = `<div class="station-header">${p.nameClean}</div>`;
+    let html = `<div class="balloon-inner-content">`;
+    html += `<div class="station-header">${p.nameClean}</div>`;
 
     const statusMap = {
         'vremenno': { text: 'Временно не работает', color: '#c62828', icon: '❌' },
@@ -1229,7 +1231,7 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
 
         html += alreadyAdded
             ? `<button class="yandex-link-btn" disabled>✓ Добавлена в маршрут</button>`
-            : `<button class="yandex-link-btn" onclick="addStationToRoute(${stId})">➕ Заехать сюда по пути</button>`;
+            : `<button class="yandex-link-btn" onclick="addStationToRoute('${stId}')">➕ Заехать сюда по пути</button>`;
     } else {
         html += `<a href="${singleNavLink}" target="_blank" class="yandex-link-btn">Отправиться сюда</a>`;
     }
@@ -1247,7 +1249,7 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
         <button id="comment-toggle-btn-${stId}" class="comment-toggle-btn" onclick="toggleCommentForm('${stId}')">
             📝 Оставить заметку
         </button>
-    `;
+    </div>`; // Закрываем .balloon-inner-content
 
     return html;
 }
@@ -1343,7 +1345,8 @@ function setStatus(text) {
 
 async function loadGuide() {
     try {
-        const res = await fetch('guide.md');
+        const gistUrl = 'https://gist.githubusercontent.com/LutherHutchinson/c0b2f374059577f3139c8e30f84f9ed1/raw/';
+        const res = await fetch(gistUrl);
         if (!res.ok) throw new Error(`HTTP error ${res.status}`);
         const text = await res.text();
 
