@@ -1419,7 +1419,13 @@ async function onCommentSubmit(stationId) {
     if (!text) return;
 
     if (!supabaseClient) {
-        alert('Система отзывов не настроена (отсутствуют ключи Supabase).');
+        let missing = [];
+        if (typeof CONFIG === 'undefined') missing.push('CONFIG undefined');
+        else {
+            if (!CONFIG.SUPABASE_URL) missing.push('SUPABASE_URL');
+            if (!CONFIG.SUPABASE_ANON_KEY) missing.push('SUPABASE_ANON_KEY');
+        }
+        alert('Система отзывов не настроена: ' + (missing.length ? 'отсутствуют [' + missing.join(', ') + ']' : 'причина неизвестна'));
         return;
     }
 
