@@ -1136,3 +1136,58 @@ input[type="range"] {
 .marker-added {
     background-color: #F8D44E;
 }
+/* === ДОБАВЛЕНО: Избранное === */
+.favorite-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    background: #e3f2fd;
+    border-left: 3px solid #2196f3;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.favorite-item:hover {
+    background: #bbdefb;
+}
+
+.favorite-item-title {
+    font-weight: bold;
+    color: #333;
+    flex: 1;
+}
+
+.fav-remove-btn {
+    width: auto;
+    margin: 0;
+    padding: 0 5px;
+    background: none;
+    border: none;
+    font-size: 16px;
+    color: #999;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+.fav-remove-btn:hover {
+    color: #f44336;
+}
+
+.fav-btn-balloon {
+    background: #fff !important;
+    border: 1px solid #ffcc00 !important;
+    color: #ff9d00 !important;
+    margin-top: 8px !important;
+    font-weight: 500 !important;
+}
+
+.fav-btn-balloon.active {
+    background: #fff8e1 !important;
+    color: #ff9d00 !important;
+    font-weight: bold !important;
+}
