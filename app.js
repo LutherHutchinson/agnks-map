@@ -694,6 +694,10 @@ function filterAndRenderStations() {
     const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
     const amenityFilter = getSelectedAmenities();
 
+    // Запоминаем ID открытого балуна, чтобы он не закрылся при перерисовке
+    const openBalloonData = objectManager.objects.balloon.getData();
+    const openId = openBalloonData ? openBalloonData.id : null;
+
     objectManager.removeAll();
 
     const routeLine = buildTurfRouteLine(showAll, isRouteActive);
@@ -758,6 +762,11 @@ function filterAndRenderStations() {
             objectManager.objects.setObjectOptions(f.id, f.options);
         }
     });
+
+    // Восстанавливаем открытый балун, если объект всё еще виден
+    if (openId && objectManager.objects.getById(openId)) {
+        objectManager.objects.balloon.open(openId);
+    }
 }
 
 // Проверяет, соответствует ли заправка фильтрам по удобствам
