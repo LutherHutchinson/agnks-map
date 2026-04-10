@@ -82,11 +82,6 @@
                 <label for="show-all">Показывать все заправки</label>
             </div>
 
-            <div class="checkbox-group">
-                <input type="checkbox" id="filter-favorites">
-                <label for="filter-favorites">⭐ Только избранные</label>
-            </div>
-
             <div id="distance-slider-group" style="display: none;">
                 <label for="distance-slider" class="filter-label">
                     Искать не дальше: <strong id="distance-val">15</strong> км от трассы
@@ -101,14 +96,14 @@
                 Фильтр по удобствам <span id="amenity-toggle-arrow">▸</span>
             </button>
             <div id="amenity-filter-panel" style="display:none;">
-                <div class="amenity-filter-note">Только для заправок Газпрома</div>
-
-                <div class="amenity-category">Время работы</div>
+                <div class="amenity-category">Ограничения и Избранное</div>
                 <div class="amenity-checkboxes">
                     <label><input type="checkbox" data-amenity="is_open_now"> 🟢 Открыто сейчас</label>
                     <label><input type="checkbox" data-amenity="around_the_clock"> 🕐 Круглосуточно</label>
+                    <label><input type="checkbox" data-amenity="is_favorite"> ⭐ Только избранные</label>
                 </div>
 
+                <div class="amenity-filter-note">Только для заправок Газпрома</div>
                 <div class="amenity-category">Оплата</div>
                 <div class="amenity-checkboxes">
                     <label><input type="checkbox" data-amenity="payment_sce"> 🪪 Карта ECOGAS</label>
