@@ -926,7 +926,7 @@ function getStationStatus(feature) {
             return hour + ':' + min;
         }) // 9 вечера -> 21:00
         .replace(/(\d{1,2})\s*-\s*(\d{1,2})\s*ч/gi, '$1:00-$2:00') // 8-20ч -> 8:00-20:00
-        .replace(/(\d{1,2})\s*ч/gi, '$1:00') // 20ч -> 20:00
+        .replace(/(\d{1,2})\s*ч(?!\d)/gi, '$1:00') // 20ч -> 20:00 (избегаем поломки 5ч30м)
         .replace(/\s+и\s+до\b/gi, '-');
 
     const segments = schedule.split(/[;\n]\s*/);
@@ -987,7 +987,7 @@ function getStationStatus(feature) {
             const isBreak = isBreakTrigger && !isNegative;
             const isGasSale = cleanSeg.includes('реализация газа');
 
-            const timeRegex = /(?:с\s*)?(\d{1,2})(?:\s*[:.ч]\s*(\d{1,2}))?\s*(?:мин)?\s*(?:-|—|–|−|по|до|и)\s*(?:до\s*)?(\d{1,2})(?:\s*[:.ч]\s*(\d{1,2}))?\s*(?:мин)?/gi;
+            const timeRegex = /(?:с\s*)?(\d{1,2})(?:\s*[:.ч]\s*(\d{1,2}))?\s*(?:мин|м)?\s*(?:-|—|–|−|по|до|и)\s*(?:до\s*)?(\d{1,2})(?:\s*[:.ч]\s*(\d{1,2}))?\s*(?:мин|м)?/gi;
             let m;
             let timeFound = false;
 
