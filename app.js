@@ -46,6 +46,15 @@ let selectedWaypoints = [];
 let userComments = {};
 let supabaseClient = null;
 
+// Избранное
+let favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
+
+// Функция сохранения избранного
+function saveFavorites() {
+    localStorage.setItem('favStations', JSON.stringify(favoriteStations));
+    filterAndRenderStations(); // Перерисовываем карту, чтобы учесть фильтр если он включен
+}
+
 // Инициализация Supabase (если указаны ключи в config.js)
 if (CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) {
     try {
@@ -336,6 +345,8 @@ function bindUIEvents() {
         sliderGroup.style.display = e.target.checked ? 'none' : 'block';
         filterAndRenderStations();
     });
+
+    document.getElementById('filter-favorites').addEventListener('change', filterAndRenderStations);
 
     distanceSlider.addEventListener('input', function (e) {
         distanceValLabel.innerText = e.target.value;
@@ -681,6 +692,7 @@ function updateRouteSidebar() {
 // Фильтрация и рендер заправок
 function filterAndRenderStations() {
     const showAll = document.getElementById('show-all').checked;
+    const filterFavs = document.getElementById('filter-favorites').checked;
     const maxDistKm = parseFloat(document.getElementById('distance-slider').value);
     const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
     const amenityFilter = getSelectedAmenities();
@@ -736,6 +748,10 @@ function filterAndRenderStations() {
             );
         } catch (e) {
             console.error(`Turf: ошибка для станции ${stId}:`, e);
+        }
+
+        if (filterFavs && !favoriteStations.includes(stId)) {
+            return false;
         }
 
         return distanceKm <= maxDistKm
@@ -1138,6 +1154,8 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const placeLink = `https://yandex.ru/maps/?text=${latS},${lonS}`;
 
     const p = feature.properties;
+    const isFav = favoriteStations.includes(stId);
+
     let html = `<div class="balloon-inner-content">`;
     html += `<div class="station-header">${p.nameClean}</div>`;
 
@@ -1235,6 +1253,14 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     } else {
         html += `<a href="${singleNavLink}" target="_blank" class="yandex-link-btn">Отправиться сюда</a>`;
     }
+
+    // Кнопка Избранного
+    html += `
+        <button class="yandex-link-btn-secondary fav-btn-balloon ${isFav ? 'active' : ''}" 
+                onclick="toggleFavorite('${stId}')">
+            ${isFav ? '⭐ В избранном' : '☆ В избранное'}
+        </button>
+    `;
 
     html += `<button class="yandex-link-btn" onclick="window.open('${placeLink}', '_blank')" style="margin-top: 10px; background-color: #f5f5f5; color: #333; border: 1px solid #ccc;">Посмотреть на Яндекс Картах</button>`;
 
@@ -1696,3 +1722,84 @@ function initBottomSheetResize() {
     window.addEventListener('mouseup', onEnd);
     window.addEventListener('touchend', onEnd);
 }
+
+/** РАБОТА С ИЗБРАННЫМ **/
+
+function toggleFavorite(stId) {
+    const index = favoriteStations.indexOf(stId);
+    if (index === -1) {
+        favoriteStations.push(stId);
+    } else {
+        favoriteStations.splice(index, 1);
+    }
+    saveFavorites();
+
+    // Находим все открытые балуны и обновляем текст кнопки, если нужно
+    // (Проще всего просто попросить Яндекса перерисовать, если это критично, 
+    // но обычно пользователь просто закрывает балун)
+    const btn = document.querySelector('.fav-btn-balloon');
+    if (btn) {
+        const isFav = favoriteStations.includes(stId);
+        btn.classList.toggle('active', isFav);
+        btn.innerHTML = isFav ? '⭐ В избранном' : '☆ В избранное';
+    }
+}
+
+function renderFavoritesList() {
+    const container = document.getElementById('favorites-container');
+    const list = document.getElementById('favorites-list');
+    if (!container || !list) return;
+
+    if (favoriteStations.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'block';
+    list.innerHTML = '';
+
+    // Для отображения названий нам нужно найти объекты по ID
+    // Мы можем взять их из searchData или gazpromStations
+    favoriteStations.forEach(stId => {
+        let station = null;
+
+        // Поиск в данных
+        if (allFeatures) {
+            station = allFeatures.find(s => s.id == stId);
+        }
+
+        if (!station) return;
+
+        const div = document.createElement('div');
+        div.className = 'favorite-item';
+        div.innerHTML = `
+            <div class="favorite-item-title" onclick="goToStation('${stId}')">${station.properties.nameClean || 'АГНКС'}</div>
+            <button class="fav-remove-btn" onclick="toggleFavorite('${stId}')" title="Удалить">✕</button>
+        `;
+        list.appendChild(div);
+    });
+}
+
+function goToStation(stId) {
+    // Находим объект
+    if (!objectManager) return;
+
+    const obj = objectManager.objects.getById(stId);
+    if (obj) {
+        const coords = obj.geometry.coordinates;
+        myMap.setCenter(coords, 14, { duration: 500 });
+
+        // Открываем балун через небольшую задержку
+        setTimeout(() => {
+            objectManager.objects.balloon.open(stId);
+        }, 600);
+    } else {
+        // Если объект не в текущем вьюпорте или не загружен (маловероятно для ObjectManager)
+        console.warn('Станция не найдена на карте:', stId);
+    }
+}
+
+// Вызываем рендер при загрузке
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(renderFavoritesList, 1000); // Даем время на загрузку данных
+});
