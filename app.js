@@ -346,8 +346,6 @@ function bindUIEvents() {
         filterAndRenderStations();
     });
 
-    document.getElementById('filter-favorites').addEventListener('change', filterAndRenderStations);
-
     distanceSlider.addEventListener('input', function (e) {
         distanceValLabel.innerText = e.target.value;
     });
@@ -692,7 +690,6 @@ function updateRouteSidebar() {
 // Фильтрация и рендер заправок
 function filterAndRenderStations() {
     const showAll = document.getElementById('show-all').checked;
-    const filterFavs = document.getElementById('filter-favorites').checked;
     const maxDistKm = parseFloat(document.getElementById('distance-slider').value);
     const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
     const amenityFilter = getSelectedAmenities();
@@ -750,10 +747,6 @@ function filterAndRenderStations() {
             console.error(`Turf: ошибка для станции ${stId}:`, e);
         }
 
-        if (filterFavs && !favoriteStations.includes(stId)) {
-            return false;
-        }
-
         return distanceKm <= maxDistKm
             && (amenityFilter.length === 0 || passesAmenityFilter(feature, amenityFilter, timeStatus));
     });
@@ -777,6 +770,9 @@ function passesAmenityFilter(feature, amenities, timeStatus) {
         }
         if (key === 'around_the_clock') {
             return timeStatus === 'always';
+        }
+        if (key === 'is_favorite') {
+            return favoriteStations.includes(feature.id);
         }
         return am[key];
     });
@@ -1745,41 +1741,6 @@ function toggleFavorite(stId) {
     }
 }
 
-function renderFavoritesList() {
-    const container = document.getElementById('favorites-container');
-    const list = document.getElementById('favorites-list');
-    if (!container || !list) return;
-
-    if (favoriteStations.length === 0) {
-        container.style.display = 'none';
-        return;
-    }
-
-    container.style.display = 'block';
-    list.innerHTML = '';
-
-    // Для отображения названий нам нужно найти объекты по ID
-    // Мы можем взять их из searchData или gazpromStations
-    favoriteStations.forEach(stId => {
-        let station = null;
-
-        // Поиск в данных
-        if (allFeatures) {
-            station = allFeatures.find(s => s.id == stId);
-        }
-
-        if (!station) return;
-
-        const div = document.createElement('div');
-        div.className = 'favorite-item';
-        div.innerHTML = `
-            <div class="favorite-item-title" onclick="goToStation('${stId}')">${station.properties.nameClean || 'АГНКС'}</div>
-            <button class="fav-remove-btn" onclick="toggleFavorite('${stId}')" title="Удалить">✕</button>
-        `;
-        list.appendChild(div);
-    });
-}
-
 function goToStation(stId) {
     // Находим объект
     if (!objectManager) return;
@@ -1799,7 +1760,7 @@ function goToStation(stId) {
     }
 }
 
-// Вызываем рендер при загрузке
+// Вызываем фильтрацию при загрузке
 document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(renderFavoritesList, 1000); // Даем время на загрузку данных
+    setTimeout(filterAndRenderStations, 1000); // Даем время на загрузку данных
 });
