@@ -12,6 +12,10 @@ const isMobile = window.innerWidth <= 600;
 const MAP_CENTER = isMobile ? [56.52401, 87.318756] : [56.52401, 90.318756];
 const MAP_ZOOM = isMobile ? 1.5 : 4;
 
+// Сразу проверяем хеш, пока Supabase его не очистила
+const isRecoveryFlow = window.location.hash && (window.location.hash.includes('type=recovery') || window.location.hash.includes('recovery'));
+if (isRecoveryFlow) console.log('Recovery flow detected at script start');
+
 // Иконки меток
 const ICON_STATION_DEFAULT = 'islands#blueDotIcon';
 const ICON_STATION_ADDED = 'islands#yellowDotIcon';
@@ -33,6 +37,7 @@ let routeGeoJsonCoords = null;
 
 // Базовый маршрут (для сортировки заездов)
 let baseRouteGeoJsonCoords = null;
+let needsFuelPlanning = false;
 
 let originGeo = null;
 let destGeo = null;
@@ -45,6 +50,8 @@ let selectedWaypoints = [];
 // Пользовательские отзывы
 let userComments = {};
 let supabaseClient = null;
+let currentUser = null;
+let authMode = 'login'; // 'login', 'register', 'reset-password', or 'update-password'
 
 // Избранное
 let favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
@@ -52,7 +59,7 @@ let favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
 // Функция сохранения избранного
 function saveFavorites() {
     localStorage.setItem('favStations', JSON.stringify(favoriteStations));
-    filterAndRenderStations(); // Перерисовываем карту, чтобы учесть фильтр если он включен
+    filterAndRenderStations(); // Перерисовываем карту
 }
 
 // Инициализация Supabase (если указаны ключи в config.js)
@@ -99,6 +106,7 @@ async function init() {
 
     initBottomSheetResize();
     bindUIEvents();
+    initAuth();
 }
 
 // Загрузка базы станций
@@ -319,7 +327,8 @@ async function loadStations() {
                 scheduleClean: scheduleLines.join('; ') || null,
                 phoneClean: phoneLines.join('; ') || null,
                 amenities: {
-                    around_the_clock: /круглосуточно|24\/7/i.test(scheduleLines.join('; '))
+                    around_the_clock: /круглосуточно|24\/7/i.test(scheduleLines.join('; ')),
+                    cng: true // Все заправки из этого файла — метановые
                 },
                 clusterCaption: item.properties.clusterCaption,
                 hintContent: nameClean,
@@ -357,6 +366,7 @@ function bindUIEvents() {
     document.getElementById('build-route').addEventListener('click', onBuildRouteClick);
     document.getElementById('reset-route').addEventListener('click', resetRoute);
     document.getElementById('btn-city-search').addEventListener('click', onCitySearchClick);
+    document.getElementById('build-route-fuel').addEventListener('click', onBuildRouteFuelClick);
 
     // Поиск при нажатии Enter в поле города
     document.getElementById('city-search').addEventListener('keypress', (e) => {
@@ -470,6 +480,372 @@ function bindUIEvents() {
         sidebarToggle.classList.remove('sidebar-open');
         sidebarOverlay.classList.remove('active');
     };
+
+    // === Auth Events ===
+    const authBtn = document.getElementById('auth-btn');
+    const authModal = document.getElementById('auth-modal');
+    const closeAuthBtn = document.getElementById('close-auth');
+    const authForm = document.getElementById('auth-form');
+    const authSwitchLink = document.getElementById('auth-switch-link');
+    const authForgotLink = document.getElementById('auth-forgot-link');
+
+    if (authBtn) {
+        authBtn.addEventListener('click', () => {
+            if (currentUser) {
+                if (confirm(`Выйти из аккаунта ${currentUser.email}?`)) {
+                    logout();
+                }
+            } else {
+                openAuthModal();
+            }
+        });
+    }
+
+    if (closeAuthBtn) {
+        closeAuthBtn.addEventListener('click', closeAuthModal);
+    }
+
+    if (authSwitchLink) {
+        authSwitchLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            toggleAuthMode();
+        });
+    }
+
+    if (authForgotLink) {
+        authForgotLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            authMode = 'reset-password';
+            updateAuthModalLabels();
+        });
+    }
+
+    if (authForm) {
+        authForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const errorEl = document.getElementById('auth-error');
+            const successEl = document.getElementById('auth-success');
+
+            errorEl.style.display = 'none';
+            successEl.style.display = 'none';
+
+            const submitBtn = document.getElementById('auth-submit-btn');
+            const originalText = submitBtn.innerText;
+            submitBtn.disabled = true;
+            submitBtn.innerText = 'Загрузка...';
+
+            try {
+                if (authMode === 'login') {
+                    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+                    if (error) throw error;
+                } else if (authMode === 'register') {
+                    const { error } = await supabaseClient.auth.signUp({ email, password });
+                    if (error) throw error;
+                    alert('Регистрация успешна!');
+                } else if (authMode === 'reset-password') {
+                    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+                        redirectTo: window.location.origin + window.location.pathname
+                    });
+                    if (error) throw error;
+                    successEl.innerText = 'Письмо для сброса пароля отправлено!';
+                    successEl.style.display = 'block';
+                    authForm.style.display = 'none';
+                } else if (authMode === 'update-password') {
+                    const { error } = await supabaseClient.auth.updateUser({ password });
+                    if (error) throw error;
+                    alert('Пароль успешно обновлен!');
+                    authMode = 'login';
+                    closeAuthModal();
+                }
+            } catch (err) {
+                errorEl.innerText = translateAuthError(err.message);
+                errorEl.style.display = 'block';
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerText = originalText;
+            }
+        });
+    }
+
+    // === Favorite Routes Events ===
+    const myRoutesBtn = document.getElementById('my-routes-btn');
+    if (myRoutesBtn) {
+        myRoutesBtn.addEventListener('click', openRoutesModal);
+    }
+    document.getElementById('close-routes').addEventListener('click', closeRoutesModal);
+
+    const saveRouteBtn = document.getElementById('save-route-btn');
+    if (saveRouteBtn) {
+        saveRouteBtn.addEventListener('click', openSaveRouteModal);
+    }
+    document.getElementById('close-save-route').addEventListener('click', closeSaveRouteModal);
+
+    const saveRouteForm = document.getElementById('save-route-form');
+    if (saveRouteForm) {
+        saveRouteForm.addEventListener('submit', onSaveRouteSubmit);
+    }
+
+    // === Report Error Events ===
+    const sidebarReportBtn = document.getElementById('sidebar-report-error');
+    if (sidebarReportBtn) {
+        sidebarReportBtn.addEventListener('click', () => openReportModal());
+    }
+
+    const closeReportBtn = document.getElementById('close-report');
+    const reportModal = document.getElementById('report-modal');
+
+    if (closeReportBtn) {
+        closeReportBtn.addEventListener('click', closeReportModal);
+    }
+
+    if (reportModal) {
+        reportModal.addEventListener('click', (e) => {
+            if (e.target === reportModal) {
+                closeReportModal();
+            }
+        });
+    }
+
+    const reportForm = document.getElementById('report-form');
+    if (reportForm) {
+        reportForm.addEventListener('submit', submitErrorReport);
+    }
+}
+
+async function onSaveRouteSubmit(e) {
+    e.preventDefault();
+    const nameInput = document.getElementById('route-name-input');
+    const name = nameInput.value.trim();
+    if (!name) return;
+
+    await saveCurrentRoute(name);
+    nameInput.value = '';
+}
+
+// === Auth Functions ===
+async function initAuth() {
+    if (!supabaseClient) return;
+
+    supabaseClient.auth.onAuthStateChange(async (event, session) => {
+        currentUser = session?.user || null;
+        updateAuthUI();
+
+        console.log('Auth event:', event, 'authMode:', authMode, 'isRecoveryFlow:', isRecoveryFlow);
+
+        if (event === 'SIGNED_IN') {
+            // Если мы в процессе восстановления пароля — НЕ закрываем окно!
+            if (authMode === 'update-password' || isRecoveryFlow) {
+                authMode = 'update-password';
+                updateAuthModalLabels();
+            } else {
+                closeAuthModal();
+            }
+            // Синхронизируем избранное при входе
+            await syncLocalFavorites();
+            await fetchFavorites();
+        } else if (event === 'SIGNED_OUT') {
+            favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
+            filterAndRenderStations();
+        } else if (event === 'PASSWORD_RECOVERY') {
+            openAuthModal('update-password');
+        }
+    });
+
+    // Если в URL были признаки восстановления — принудительно открываем форму
+    if (isRecoveryFlow) {
+        console.log('Forcing open update-password modal');
+        openAuthModal('update-password');
+    }
+
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    currentUser = session?.user || null;
+    updateAuthUI();
+
+    if (currentUser) {
+        await fetchFavorites();
+        await fetchSavedRoutes(); // Добавлено
+    }
+}
+
+async function fetchFavorites() {
+    if (!supabaseClient || !currentUser) return;
+    try {
+        const { data, error } = await supabaseClient
+            .from('favorites')
+            .select('station_id')
+            .eq('user_id', currentUser.id);
+
+        if (error) throw error;
+
+        // Объединяем с локальными или заменяем? Обычно лучше объединить
+        const remoteIds = data.map(item => item.station_id);
+        const localIds = JSON.parse(localStorage.getItem('favStations') || '[]');
+
+        // Уникальный набор
+        const combined = new Set([...localIds, ...remoteIds]);
+        favoriteStations = Array.from(combined);
+        saveFavorites();
+    } catch (err) {
+        console.error('Error fetching favorites:', err);
+    }
+}
+
+async function syncLocalFavorites() {
+    if (!supabaseClient || !currentUser) return;
+    const localIds = JSON.parse(localStorage.getItem('favStations') || '[]');
+    if (localIds.length === 0) return;
+
+    try {
+        const toInsert = localIds.map(id => ({
+            user_id: currentUser.id,
+            station_id: id
+        }));
+
+        // Используем upsert чтобы избежать ошибок дубликатов
+        const { error } = await supabaseClient
+            .from('favorites')
+            .upsert(toInsert, { onConflict: 'user_id,station_id' });
+
+        if (error) throw error;
+    } catch (err) {
+        console.error('Error syncing local favorites:', err);
+    }
+}
+
+async function syncFavoriteToSupabase(stId) {
+    if (!supabaseClient || !currentUser) return;
+    try {
+        await supabaseClient
+            .from('favorites')
+            .upsert({ user_id: currentUser.id, station_id: stId }, { onConflict: 'user_id,station_id' });
+    } catch (err) {
+        console.error('Error adding favorite to Supabase:', err);
+    }
+}
+
+async function removeFavoriteFromSupabase(stId) {
+    if (!supabaseClient || !currentUser) return;
+    try {
+        await supabaseClient
+            .from('favorites')
+            .delete()
+            .eq('user_id', currentUser.id)
+            .eq('station_id', stId);
+    } catch (err) {
+        console.error('Error removing favorite from Supabase:', err);
+    }
+}
+
+function updateAuthUI() {
+    const authBtn = document.getElementById('auth-btn');
+    if (!authBtn) return;
+
+    if (currentUser) {
+        const name = currentUser.email.split('@')[0];
+        authBtn.innerHTML = `👤 ${name}`;
+        authBtn.title = `Вы вошли как ${currentUser.email}. Нажмите, чтобы выйти.`;
+    } else {
+        authBtn.innerHTML = `👤 Войти`;
+        authBtn.title = `Вход / Регистрация`;
+    }
+
+    // Состояние кнопки "Мои маршруты" и "Сохранить маршрут"
+    const myRoutesBtn = document.getElementById('my-routes-btn');
+    if (myRoutesBtn) {
+        myRoutesBtn.style.display = currentUser ? 'flex' : 'none';
+    }
+}
+
+function openAuthModal(mode = 'login') {
+    authMode = mode;
+    updateAuthModalLabels();
+    document.getElementById('auth-modal').style.display = 'flex';
+}
+
+function closeAuthModal() {
+    document.getElementById('auth-modal').style.display = 'none';
+    document.getElementById('auth-error').style.display = 'none';
+    document.getElementById('auth-success').style.display = 'none';
+    document.getElementById('auth-form').reset();
+    document.getElementById('auth-form').style.display = 'block';
+}
+
+function translateAuthError(msg) {
+    if (!msg) return 'Неизвестная ошибка';
+    const lower = msg.toLowerCase();
+    if (lower.includes('invalid login credentials')) return 'Неверный email или пароль';
+    if (lower.includes('user already registered')) return 'Пользователь с таким email уже зарегистрирован.';
+    if (lower.includes('password should be at least 6 characters')) return 'Пароль должен быть не менее 6 символов.';
+    if (lower.includes('signup disabled')) return 'Регистрация временно отключена.';
+    if (lower.includes('email link is invalid or has expired')) return 'Ссылка недействительна или срок её действия истек.';
+    if (lower.includes('rate limit exceeded')) return 'Слишком много попыток. Пожалуйста, подождите немного (обычно 1 час).';
+    if (lower.includes('network error') || lower.includes('failed to fetch')) return 'Ошибка сети. Проверьте соединение с интернетом.';
+
+    return msg;
+}
+
+function toggleAuthMode() {
+    authMode = (authMode === 'login' ? 'register' : 'login');
+    updateAuthModalLabels();
+}
+
+function updateAuthModalLabels() {
+    const title = document.getElementById('auth-title');
+    const submitBtn = document.getElementById('auth-submit-btn');
+    const switchText = document.getElementById('auth-switch-text');
+    const switchLink = document.getElementById('auth-switch-link');
+    const forgotWrap = document.getElementById('auth-forgot-wrap');
+    const emailInput = document.getElementById('auth-email');
+    const passwordInput = document.getElementById('auth-password');
+    const emailGroup = emailInput.closest('.input-group');
+    const passGroup = passwordInput.closest('.input-group');
+    const authSwitch = document.querySelector('.auth-switch');
+
+    // Сброс видимости по умолчанию
+    emailGroup.style.display = 'flex';
+    passGroup.style.display = 'flex';
+    authSwitch.style.display = 'block';
+    forgotWrap.style.display = 'block';
+
+    // Сброс required
+    emailInput.required = true;
+    passwordInput.required = true;
+
+    if (authMode === 'login') {
+        title.innerText = 'Вход';
+        submitBtn.innerText = 'Войти';
+        switchText.innerText = 'Нет аккаунта?';
+        switchLink.innerText = 'Зарегистрироваться';
+    } else if (authMode === 'register') {
+        title.innerText = 'Регистрация';
+        submitBtn.innerText = 'Создать аккаунт';
+        switchText.innerText = 'Уже есть аккаунт?';
+        switchLink.innerText = 'Войти';
+        forgotWrap.style.display = 'none';
+    } else if (authMode === 'reset-password') {
+        title.innerText = 'Сброс пароля';
+        submitBtn.innerText = 'Отправить письмо';
+        passGroup.style.display = 'none';
+        passwordInput.required = false; // Отключаем, так как поле скрыто
+        switchText.innerText = 'Вспомнили пароль?';
+        switchLink.innerText = 'Войти';
+        forgotWrap.style.display = 'none';
+    } else if (authMode === 'update-password') {
+        title.innerText = 'Новый пароль';
+        submitBtn.innerText = 'Сохранить';
+        emailGroup.style.display = 'none';
+        emailInput.required = false; // Отключаем
+        authSwitch.style.display = 'none';
+        forgotWrap.style.display = 'none';
+    }
+}
+
+async function logout() {
+    if (supabaseClient) {
+        await supabaseClient.auth.signOut();
+    }
 }
 
 // Возвращает список выбранных фильтров по удобствам
@@ -558,6 +934,7 @@ function onBuildRoute(fromInput, toInput) {
             window.closeSidebar();
         }
 
+        setStatus(`Маршрут рассчитан: ${originName} — ${destName}`);
         requestRouteAndRedraw();
         document.getElementById('reset-route').style.display = 'block';
 
@@ -567,6 +944,134 @@ function onBuildRoute(fromInput, toInput) {
     });
 }
 
+function onBuildRouteFuelClick() {
+    const fromInput = document.getElementById('route-from').value.trim();
+    const toInput = document.getElementById('route-to').value.trim();
+
+    if (!fromInput || !toInput) {
+        setStatus('Укажите оба пункта (Откуда и Куда)');
+        return;
+    }
+
+    needsFuelPlanning = true;
+    onBuildRoute(fromInput, toInput);
+}
+
+async function planFuelRoute() {
+    if (!routeGeoJsonCoords || routeGeoJsonCoords.length < 2) {
+        console.warn('Fuel Planning: No route coordinates available');
+        return;
+    }
+
+    const consumption = parseFloat(document.getElementById('fuel-consumption').value) || 10;
+    const tankVolume = parseFloat(document.getElementById('fuel-tank').value) || 20;
+    const initialPercent = parseFloat(document.getElementById('fuel-initial').value) || 50;
+
+    // Математический расчет запаса
+    const totalRange = (tankVolume / consumption) * 100;
+    const reserveRange = totalRange * 0.10; // 10% запаса
+    const usableRange = totalRange - reserveRange;
+
+    let currentPosOnRoute = 0;
+    let currentTankRange = (totalRange * (initialPercent / 100)) - reserveRange;
+
+    // Если начальный уровень топлива уже ниже 10%, мы должны заправиться немедленно (в пределах оставшегося топлива)
+    if (currentTankRange < 0) {
+        currentTankRange = (totalRange * (initialPercent / 100)); // Используем всё что есть до нуля
+    }
+
+    console.log(`Greedy Planning: Range=${totalRange.toFixed(1)}km, Usable=${usableRange.toFixed(1)}km, StartBudget=${currentTankRange.toFixed(1)}km`);
+    setStatus('Оптимальный расчет остановок...');
+
+    const baseLine = turf.lineString(routeGeoJsonCoords);
+    const totalDistKm = turf.length(baseLine, { units: 'kilometers' });
+
+    // 1. Собираем всех кандидатов в радиусе 15км от трассы
+    const allCngStations = allFeatures.filter(f => {
+        const props = f.properties;
+        return (props.amenities && props.amenities.cng) || (props.categories && props.categories.cng);
+    });
+
+    const candidates = [];
+    allCngStations.forEach(st => {
+        const [stLat, stLon] = st.geometry.coordinates;
+        const stPoint = turf.point([stLon, stLat]);
+
+        // Расстояние от заправки до всей линии маршрута
+        const distToLine = turf.pointToLineDistance(stPoint, baseLine, { units: 'kilometers' });
+        if (distToLine < 15) {
+            // Проецируем точку на линию, чтобы узнать расстояние от начала маршрута
+            const snapped = turf.nearestPointOnLine(baseLine, stPoint, { units: 'kilometers' });
+            candidates.push({
+                st,
+                dist: snapped.properties.location, // Дистанция от старта в км
+                coords: [stLat, stLon]
+            });
+        }
+    });
+
+    // Сортируем кандидатов по дистанции от начала
+    candidates.sort((a, b) => a.dist - b.dist);
+    console.log(`Found ${candidates.length} candidate stations near route.`);
+
+    const stopsToAdd = [];
+    let d = 0;
+    let budget = currentTankRange;
+    let lastStopDist = 0;
+
+    // Жадный алгоритм: идем как можно дальше
+    while (lastStopDist + budget < totalDistKm) {
+        const jumpLimit = lastStopDist + budget;
+
+        // Ищем самую дальнюю заправку в зоне досягаемости (budget)
+        let bestCandidate = null;
+        for (const cand of candidates) {
+            if (cand.dist > lastStopDist && cand.dist <= jumpLimit) {
+                if (!bestCandidate || cand.dist > bestCandidate.dist) {
+                    bestCandidate = cand;
+                }
+            }
+        }
+
+        if (!bestCandidate) {
+            // Разрыв слишком велик
+            console.warn(`Insufficient infrastructure at ${lastStopDist.toFixed(1)} km. Gap exceeds budget ${budget.toFixed(1)} km.`);
+            alert(`ВНИМАНИЕ: Маршрут не рекомендуется. Между станциями слишком большой разрыв в районе ${(lastStopDist + budget).toFixed(0)} км.`);
+            setStatus('Маршрут не рекомендуется (разрыв)');
+            break;
+        }
+
+        // Добавляем остановку
+        stopsToAdd.push({
+            id: String(bestCandidate.st.id),
+            name: bestCandidate.st.properties.nameClean,
+            lat: bestCandidate.coords[0],
+            lon: bestCandidate.coords[1]
+        });
+
+        lastStopDist = bestCandidate.dist;
+        budget = usableRange; // После заправки бюджет — полный бак минус 10%
+        console.log(`Selected stop: ${bestCandidate.st.properties.nameClean} at ${lastStopDist.toFixed(1)} km`);
+    }
+
+    if (stopsToAdd.length > 0) {
+        console.log(`Optimal stops found: ${stopsToAdd.length}`);
+        selectedWaypoints = [...selectedWaypoints, ...stopsToAdd];
+
+        // Итоговая сортировка (на всякий случай)
+        if (baseRouteGeoJsonCoords) {
+            const tempBaseLine = turf.lineString(baseRouteGeoJsonCoords);
+            selectedWaypoints.sort((a, b) => {
+                const locA = turf.nearestPointOnLine(tempBaseLine, turf.point([a.lon, a.lat])).properties.location || 0;
+                const locB = turf.nearestPointOnLine(tempBaseLine, turf.point([b.lon, b.lat])).properties.location || 0;
+                return locA - locB;
+            });
+        }
+        requestRouteAndRedraw();
+    } else if (lastStopDist + budget >= totalDistKm) {
+        setStatus('Заправок по пути не требуется.');
+    }
+}
 // Сброс маршрута
 function resetRoute() {
     originGeo = null;
@@ -586,6 +1091,7 @@ function resetRoute() {
     document.getElementById('route-to').value = '';
     document.getElementById('status').innerText = '';
     document.getElementById('reset-route').style.display = 'none';
+    document.getElementById('save-route-btn').style.display = 'none'; // Скрываем и эту кнопку
 
     updateRouteSidebar();
     filterAndRenderStations();
@@ -634,8 +1140,8 @@ function requestRouteAndRedraw() {
         // Инверсия координат для Turf.js: [lat, lon] -> [lon, lat]
         routeGeoJsonCoords = coords.map(c => [c[1], c[0]]);
 
-        // Сохранение базового маршрута (эталон для сортировки)
-        if (selectedWaypoints.length === 0) {
+        // Сохранение базового маршрута (эталон для сортировки) и центрирование
+        if (!baseRouteGeoJsonCoords) {
             baseRouteGeoJsonCoords = routeGeoJsonCoords;
             myMap.setBounds(routeObj.geometry.getBounds(), {
                 checkZoomRange: true,
@@ -646,6 +1152,16 @@ function requestRouteAndRedraw() {
         updateRouteSidebar();
         filterAndRenderStations();
         setStatus('Маршрут готов!');
+
+        if (needsFuelPlanning) {
+            needsFuelPlanning = false;
+            planFuelRoute();
+        }
+
+        // Показываем кнопку "Сохранить маршрут" если маршрут готов
+        if (currentUser) {
+            document.getElementById('save-route-btn').style.display = 'block';
+        }
 
     }, function (error) {
         console.error('Яндекс маршруты:', error);
@@ -665,6 +1181,13 @@ function updateRouteSidebar() {
     }
 
     container.style.display = 'block';
+
+    // Показываем/скрываем заголовок "Заезды по пути"
+    const titleEl = document.getElementById('waypoints-title');
+    if (titleEl) {
+        titleEl.style.display = selectedWaypoints.length > 0 ? 'block' : 'none';
+    }
+
     listEl.innerHTML = '';
 
     const rtextParts = [`${originGeo[0]},${originGeo[1]}`];
@@ -1162,6 +1685,7 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const isFav = favoriteStations.includes(stId);
 
     let html = `<div class="balloon-inner-content">`;
+    html += `<button class="balloon-report-err-btn" onclick="openReportModal('${stId}')" title="Сообщить об ошибке">⚠️</button>`;
     html += `<div class="station-header">${p.nameClean}</div>`;
 
     const statusMap = {
@@ -1388,7 +1912,7 @@ async function loadGuide() {
             lines.forEach(line => {
                 const li = document.createElement('li');
                 li.innerHTML = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                listEl.appendChild(li);
+                guideList.appendChild(li);
             });
         }
     } catch (err) {
@@ -1404,7 +1928,8 @@ async function fetchComments() {
     try {
         const { data, error } = await supabaseClient
             .from('comments')
-            .select('*');
+            .select('id, station_id, text, date, author_email')
+            .order('created_at', { ascending: true });
 
         if (!error && data) {
             userComments = {};
@@ -1412,7 +1937,8 @@ async function fetchComments() {
                 if (!userComments[c.station_id]) userComments[c.station_id] = [];
                 userComments[c.station_id].push({
                     text: c.text,
-                    date: c.date
+                    date: c.date,
+                    author_email: c.author_email
                 });
             });
             console.log('Comments loaded from Supabase');
@@ -1433,7 +1959,10 @@ function buildCommentsHtml(stationId) {
     return comments.slice().reverse().map(c => `
         <div class="comment-item">
             <div class="comment-text">${escapeHtml(c.text)}</div>
-            <div class="comment-meta">${c.date}</div>
+            <div class="comment-meta">
+                ${c.author_email ? `<span class="comment-author" title="${c.author_email}">${c.author_email.split('@')[0]}</span> • ` : ''}
+                ${c.date}
+            </div>
         </div>
     `).join('');
 }
@@ -1464,15 +1993,27 @@ async function onCommentSubmit(stationId) {
     const dateStr = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     try {
+        const newComment = {
+            station_id: String(stationId),
+            text,
+            date: dateStr,
+            user_id: currentUser?.id || null,
+            author_email: currentUser?.email || null
+        };
+
         const { error } = await supabaseClient
             .from('comments')
-            .insert([{ station_id: String(stationId), text, date: dateStr }]);
+            .insert([newComment]);
 
         if (!error) {
             input.value = '';
             // Локально обновляем данные для мгновенного отображения
             if (!userComments[stationId]) userComments[stationId] = [];
-            userComments[stationId].push({ text, date: dateStr });
+            userComments[stationId].push({
+                text,
+                date: dateStr,
+                author_email: currentUser?.email || null
+            });
 
             // Перерисовываем список отзывов
             const list = document.getElementById(`comments-list-${stationId}`);
@@ -1507,6 +2048,174 @@ function toggleCommentForm(stationId) {
         formWrap.style.display = 'none';
         toggleBtn.style.display = 'block';
     }
+}
+let savedRoutes = [];
+
+async function fetchSavedRoutes() {
+    if (!supabaseClient || !currentUser) return;
+    try {
+        const { data, error } = await supabaseClient
+            .from('saved_routes')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (!error && data) {
+            savedRoutes = data;
+            renderSavedRoutes();
+            console.log('Saved routes loaded:', savedRoutes.length);
+        } else if (error) {
+            console.warn('Error fetching routes:', error);
+        }
+    } catch (e) {
+        console.error('Saved routes exception:', e);
+    }
+}
+
+async function saveCurrentRoute(name) {
+    if (!supabaseClient || !currentUser) {
+        alert('Войдите, чтобы сохранять маршруты');
+        return;
+    }
+
+    if (!originGeo || !destGeo) {
+        alert('Сначала проложите маршрут');
+        return;
+    }
+
+    // Проверка корректности координат (Yandex возвращает [lat, lon])
+    if (isNaN(originGeo[0]) || isNaN(originGeo[1]) || isNaN(destGeo[0]) || isNaN(destGeo[1])) {
+        alert('Ошибка в координатах маршрута. Попробуйте еще раз.');
+        console.error('Invalid coords for saving:', { originGeo, destGeo });
+        return;
+    }
+
+    try {
+        const newRoute = {
+            user_id: currentUser.id,
+            name: name || `Маршрут от ${new Date().toLocaleDateString()}`,
+            origin_name: originName || 'Точка А',
+            dest_name: destName || 'Точка Б',
+            origin_coords: originGeo,
+            dest_coords: destGeo,
+            waypoints: selectedWaypoints || []
+        };
+
+        console.log('Saving route to Supabase...', newRoute);
+
+        const { data, error } = await supabaseClient
+            .from('saved_routes')
+            .insert([newRoute])
+            .select();
+
+        if (!error && data) {
+            savedRoutes.unshift(data[0]);
+            renderSavedRoutes();
+            closeSaveRouteModal();
+            console.log('Route saved successfully:', data[0]);
+        } else {
+            console.error('Supabase error saving route:', error);
+            alert(`Ошибка при сохранении: ${error?.message || 'Неизвестная ошибка'}`);
+        }
+    } catch (e) {
+        console.error('Save route exception:', e);
+        alert('Внутренняя ошибка при сохранении');
+    }
+}
+
+async function deleteSavedRoute(id) {
+    if (!confirm('Удалить этот маршрут?')) return;
+
+    try {
+        const { error } = await supabaseClient
+            .from('saved_routes')
+            .delete()
+            .eq('id', id);
+
+        if (!error) {
+            savedRoutes = savedRoutes.filter(r => r.id !== id);
+            renderSavedRoutes();
+            console.log('Route deleted');
+        } else {
+            console.error('Error deleting route:', error);
+        }
+    } catch (e) {
+        console.error('Delete route exception:', e);
+    }
+}
+
+function renderSavedRoutes() {
+    const listEl = document.getElementById('routes-list');
+    if (!listEl) return;
+
+    if (savedRoutes.length === 0) {
+        listEl.innerHTML = '<div class="loading-placeholder">У вас пока нет сохраненных маршрутов.</div>';
+        return;
+    }
+
+    listEl.innerHTML = savedRoutes.map(r => `
+        <div class="route-card">
+            <div class="route-card-title">${escapeHtml(r.name)}</div>
+            <div class="route-card-path">
+                ${escapeHtml(r.origin_name || 'Точка А')} → ${escapeHtml(r.dest_name || 'Точка Б')}
+                ${r.waypoints.length > 0 ? `<br><small>(${r.waypoints.length} заправок по пути)</small>` : ''}
+            </div>
+            <div class="route-card-actions">
+                <button class="card-action-btn" onclick="loadSavedRoute('${r.id}')">Загрузить</button>
+                <button class="card-action-btn delete" onclick="deleteSavedRoute('${r.id}')">Удалить</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+window.loadSavedRoute = function (id) {
+    const route = savedRoutes.find(r => r.id === id);
+    if (!route) return;
+
+    // Сброс текущего состояния
+    resetRoute();
+
+    // Восстановление
+    document.getElementById('route-from').value = route.origin_name || '';
+    document.getElementById('route-to').value = route.dest_name || '';
+    originName = route.origin_name || '';
+    destName = route.dest_name || '';
+
+    // Сохраняем координаты как массивы
+    originGeo = route.origin_coords;
+    destGeo = route.dest_coords;
+
+    selectedWaypoints = JSON.parse(JSON.stringify(route.waypoints));
+
+    // Настраиваем фильтрацию: убираем лишние заправки
+    const showAllCb = document.getElementById('show-all');
+    if (showAllCb) {
+        showAllCb.checked = false;
+        document.getElementById('distance-slider-group').style.display = 'block';
+    }
+
+    closeRoutesModal();
+    requestRouteAndRedraw();
+};
+
+function openRoutesModal() {
+    document.getElementById('routes-modal').style.display = 'flex';
+    fetchSavedRoutes();
+}
+
+function closeRoutesModal() {
+    document.getElementById('routes-modal').style.display = 'none';
+}
+
+function openSaveRouteModal() {
+    if (!currentUser) {
+        openAuthModal('login');
+        return;
+    }
+    document.getElementById('save-route-modal').style.display = 'flex';
+}
+
+function closeSaveRouteModal() {
+    document.getElementById('save-route-modal').style.display = 'none';
 }
 
 /** Кастомные подсказки через наш серверный прокси */
@@ -1730,18 +2439,29 @@ function initBottomSheetResize() {
 
 /** РАБОТА С ИЗБРАННЫМ **/
 
-function toggleFavorite(stId) {
+async function toggleFavorite(stId) {
     const index = favoriteStations.indexOf(stId);
+    let isAdding = false;
     if (index === -1) {
         favoriteStations.push(stId);
+        isAdding = true;
     } else {
         favoriteStations.splice(index, 1);
+        isAdding = false;
     }
+
     saveFavorites();
 
+    // Синхронизация с облаком
+    if (currentUser) {
+        if (isAdding) {
+            await syncFavoriteToSupabase(stId);
+        } else {
+            await removeFavoriteFromSupabase(stId);
+        }
+    }
+
     // Находим все открытые балуны и обновляем текст кнопки, если нужно
-    // (Проще всего просто попросить Яндекса перерисовать, если это критично, 
-    // но обычно пользователь просто закрывает балун)
     const btn = document.querySelector('.fav-btn-balloon');
     if (btn) {
         const isFav = favoriteStations.includes(stId);
@@ -1766,6 +2486,134 @@ function goToStation(stId) {
     } else {
         // Если объект не в текущем вьюпорте или не загружен (маловероятно для ObjectManager)
         console.warn('Станция не найдена на карте:', stId);
+    }
+}
+
+// === РАБОТА С ОШИБКАМИ (REPORT ERROR) ===
+
+window.openReportModal = function (stationId = null) {
+    const modal = document.getElementById('report-modal');
+    const stationIdInput = document.getElementById('report-station-id');
+    const stationNameDiv = document.getElementById('report-station-name');
+    const emailInput = document.getElementById('report-email');
+    const typeContainer = document.getElementById('report-type-container');
+
+    // Сброс формы
+    document.getElementById('report-form').reset();
+    document.getElementById('report-error').style.display = 'none';
+    document.getElementById('report-success').style.display = 'none';
+
+    // Подготовка вариантов ошибок
+    let options = [];
+    if (stationId) {
+        options = [
+            { value: 'not_exists', text: 'Заправки не существует' },
+            { value: 'coordinates', text: 'Ошибка в координатах' },
+            { value: 'closed', text: 'Заправка закрыта/не работает' },
+            { value: 'other', text: 'Другое' }
+        ];
+    } else {
+        options = [
+            { value: 'price', text: 'Не указана заправка' },
+            { value: 'coordinates', text: 'Ошибка в координатах' },
+            { value: 'closed', text: 'Заправка закрыта/не работает' },
+            { value: 'other', text: 'Другое' }
+        ];
+    }
+
+    // Рендерим радио-кнопки
+    typeContainer.innerHTML = options.map((opt, index) => `
+        <label>
+            <input type="radio" name="error_type" value="${opt.value}" ${index === 0 ? 'required' : ''}>
+            ${opt.text}
+        </label>
+    `).join('');
+
+    if (stationId) {
+        stationIdInput.value = stationId;
+
+        // Находим название станции по ID
+        let stationName = 'Заправка';
+        const st = allFeatures.find(f => f.id === stationId);
+        if (st && st.properties && st.properties.nameClean) {
+            stationName = st.properties.nameClean;
+        }
+
+        stationNameDiv.innerText = `Станция: ${stationName}`;
+        stationNameDiv.style.display = 'block';
+    } else {
+        stationIdInput.value = '';
+        stationNameDiv.style.display = 'none';
+    }
+
+    if (currentUser?.email) {
+        emailInput.value = currentUser.email;
+    }
+
+    modal.style.display = 'flex';
+};
+
+function closeReportModal() {
+    document.getElementById('report-modal').style.display = 'none';
+}
+
+async function submitErrorReport(e) {
+    e.preventDefault();
+
+    if (!supabaseClient) {
+        alert('Система отправки ошибок не настроена.');
+        return;
+    }
+
+    const submitBtn = document.getElementById('report-submit-btn');
+    const errorEl = document.getElementById('report-error');
+    const successEl = document.getElementById('report-success');
+
+    const stationId = document.getElementById('report-station-id').value;
+    const errorType = document.querySelector('input[name="error_type"]:checked')?.value;
+    const description = document.getElementById('report-description').value;
+    const email = document.getElementById('report-email').value;
+
+    if (!errorType) {
+        errorEl.innerText = 'Выберите тип ошибки';
+        errorEl.style.display = 'block';
+        return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.innerText = 'Отправка...';
+    errorEl.style.display = 'none';
+
+    try {
+        const { error } = await supabaseClient
+            .from('error_reports')
+            .insert([{
+                station_id: stationId || null,
+                error_type: errorType,
+                description: description,
+                author_email: email,
+                user_id: currentUser?.id || null
+            }]);
+
+        if (error) throw error;
+
+        successEl.innerText = 'Спасибо! Информация отправлена на модерацию.';
+        successEl.style.display = 'block';
+        document.getElementById('report-form').style.display = 'none';
+
+        setTimeout(() => {
+            closeReportModal();
+            // Сбрасываем видимость формы для следующего раза
+            document.getElementById('report-form').style.display = 'block';
+        }, 3000);
+
+    } catch (err) {
+        console.error('Error submitting report:', err);
+        errorEl.innerText = 'Ошибка при отправке: ' + err.message;
+        errorEl.style.display = 'block';
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Отправить';
     }
 }
 
