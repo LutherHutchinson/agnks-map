@@ -31,7 +31,12 @@
 
     <!-- ПАНЕЛЬ УПРАВЛЕНИЯ -->
     <div id="controls">
-        <h3>Планировщик АГНКС</h3>
+        <div class="header-with-auth">
+            <h3>Планировщик АГНКС</h3>
+            <div class="header-btns">
+                <button id="auth-btn" class="auth-btn" title="Вход / Профиль">👤 Войти</button>
+            </div>
+        </div>
 
         <!-- Поиск одного города -->
         <div class="city-search-group">
@@ -43,6 +48,8 @@
         </div>
 
         <div class="search-divider">или проложить маршрут:</div>
+        <button id="my-routes-btn" class="my-routes-large-btn" style="display: none;">🗺️ Мои сохраненные
+            маршруты</button>
 
         <!-- Ввод маршрута -->
         <div class="route-inputs">
@@ -65,13 +72,14 @@
 
         <!-- Выбранные промежуточные заправки -->
         <div id="route-list-container">
-            <div class="route-list-title">Заезды по пути:</div>
+            <div id="waypoints-title" class="route-list-title">Заезды по пути:</div>
             <div id="waypoints-list"></div>
 
             <a id="launch-nav" href="#" target="_blank" class="final-nav-btn" style="display: none;">
                 🚗 ПОЕХАЛИ (Навигатор)
             </a>
-            <button id="reset-route" class="reset-filters-btn reset-route-big" style="display: none;">✕ Сбросить
+            <button id="save-route-btn" class="save-route-btn" style="display: none;">⭐ Сохранить маршрут</button>
+            <button id="reset-route" class="reset-filters-btn" style="display: none;">✕ Сбросить
                 маршрут</button>
         </div>
 
@@ -191,6 +199,66 @@
 
                     </ol>
                 </div>
+            </div>
+        </div>
+    </div>
+    <!-- Модальное окно авторизации -->
+    <div id="auth-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content auth-modal-content">
+            <button id="close-auth" class="close-btn" type="button">&times;</button>
+            <h2 id="auth-title">Вход</h2>
+            <div class="modal-body">
+                <form id="auth-form">
+                    <div class="input-group">
+                        <label for="auth-email">Email</label>
+                        <input type="email" id="auth-email" placeholder="example@mail.com" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="auth-password">Пароль</label>
+                        <input type="password" id="auth-password" placeholder="••••••••" required>
+                    </div>
+                    <button type="submit" id="auth-submit-btn" class="build-route-btn">Войти</button>
+                </form>
+                <div class="auth-switch">
+                    <span id="auth-switch-text">Нет аккаунта?</span>
+                    <a href="#" id="auth-switch-link">Зарегистрироваться</a>
+                </div>
+                <div class="auth-forgot" id="auth-forgot-wrap">
+                    <a href="#" id="auth-forgot-link">Забыли пароль?</a>
+                </div>
+                <div id="auth-error" class="auth-error" style="display: none;"></div>
+                <div id="auth-success" class="auth-success" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно любимых маршрутов -->
+    <div id="routes-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <button id="close-routes" class="close-btn" type="button">&times;</button>
+            <h2>Мои маршруты</h2>
+            <div class="modal-body">
+                <div id="routes-list" class="routes-list">
+                    <!-- Сюда будут динамически добавляться маршруты -->
+                    <div class="loading-placeholder">Загрузка...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно сохранения маршрута -->
+    <div id="save-route-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content auth-modal-content">
+            <button id="close-save-route" class="close-btn" type="button">&times;</button>
+            <h2>Сохранить маршрут</h2>
+            <div class="modal-body">
+                <form id="save-route-form">
+                    <div class="input-group">
+                        <label for="route-name-input">Название маршрута</label>
+                        <input type="text" id="route-name-input" placeholder="Напр: Домой, В отпуск..." required>
+                    </div>
+                    <button type="submit" class="build-route-btn">Сохранить</button>
+                </form>
             </div>
         </div>
     </div>
