@@ -67,6 +67,26 @@
         </div>
         <button id="build-route">Проложить маршрут</button>
 
+        <div class="fuel-calc-section">
+            <div class="fuel-calc-title">Расчет маршрута по расходу топлива</div>
+            <div class="fuel-inputs-row">
+                <div class="fuel-input-group">
+                    <label for="fuel-consumption">Расход (м³/100км)</label>
+                    <input type="number" id="fuel-consumption" value="20" step="0.1" min="1">
+                </div>
+                <div class="fuel-input-group">
+                    <label for="fuel-tank">Объем бака (м³)</label>
+                    <input type="number" id="fuel-tank" value="80" step="1" min="1">
+                </div>
+                <div class="fuel-input-group">
+                    <label for="fuel-initial">Остаток (%)</label>
+                    <input type="number" id="fuel-initial" value="50" step="1" min="0" max="100">
+                </div>
+            </div>
+            <button id="build-route-fuel" class="fuel-calc-btn">Составить маршрут с заездами</button>
+            <div class="fuel-disclaimer">*функция имеет сугубо ознакомительный характер, перепроверяйте информацию</div>
+        </div>
+
         <!-- Строка статуса -->
         <div id="status"></div>
 
@@ -176,6 +196,9 @@
 
         <!-- Кнопка Инструкции -->
         <button id="guide-btn" class="guide-btn" type="button">ℹ️ Инструкция: Как заправляться метаном</button>
+
+        <!-- Кнопка сообщить об ошибке -->
+        <button id="sidebar-report-error" class="sidebar-report-btn" type="button">⚠️ Сообщить об ошибке</button>
     </div>
 
     <!-- КАРТА -->
@@ -259,6 +282,42 @@
                     </div>
                     <button type="submit" class="build-route-btn">Сохранить</button>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно сообщения об ошибке -->
+    <div id="report-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content report-modal-content">
+            <button id="close-report" class="close-btn" type="button">&times;</button>
+            <h2>Сообщить об ошибке</h2>
+            <div class="modal-body">
+                <form id="report-form">
+                    <input type="hidden" id="report-station-id">
+                    <div id="report-station-name" class="report-station-name"></div>
+
+                    <div class="input-group">
+                        <label>Тип ошибки</label>
+                        <div id="report-type-container" class="radio-group">
+                            <!-- Radio buttons will be inserted here dynamically -->
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="report-description">Описание</label>
+                        <textarea id="report-description" placeholder="Опишите проблему подробнее..."
+                            rows="3"></textarea>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="report-email">Ваш Email (ответим, если нужно)</label>
+                        <input type="email" id="report-email" placeholder="example@mail.com">
+                    </div>
+
+                    <button type="submit" id="report-submit-btn" class="build-route-btn">Отправить</button>
+                </form>
+                <div id="report-error" class="auth-error" style="display: none;"></div>
+                <div id="report-success" class="auth-success" style="display: none;"></div>
             </div>
         </div>
     </div>

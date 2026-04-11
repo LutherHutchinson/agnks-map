@@ -92,3 +92,29 @@ create policy "Users can manage their own routes"
   on saved_routes for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- Таблица для жалоб на ошибки
+create table if not exists error_reports (
+  id uuid default gen_random_uuid() primary key,
+  station_id text, -- Опционально, если жалоба из балуна
+  error_type text not null,
+  description text,
+  user_id uuid references auth.users,
+  author_email text,
+  status text default 'pending', -- pending, fixed, rejected
+  created_at timestamp with time zone default now()
+);
+
+-- Настройка безопасности (RLS)
+alter table error_reports enable row level security;
+
+-- Разрешаем анонимам отправлять отчеты
+create policy "Allow anonymous insert error reports"
+  on error_reports for insert
+  with check (true);
+
+-- Разрешаем чтение только админам (или через сервисную роль)
+-- Для простоты в рамках этого проекта, если нужно модерировать через JS:
+create policy "Allow public read status for their own reports"
+  on error_reports for select
+  using (auth.uid() = user_id);

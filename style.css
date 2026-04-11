@@ -1071,15 +1071,13 @@ input[type="range"] {
 
 /* Наш кастомный контейнер внутри балуна */
 .balloon-inner-content {
+    position: relative;
     max-height: 320px !important;
-    /* Уменьшил, чтобы точно влезло */
     overflow-y: auto !important;
     overflow-x: hidden !important;
     padding-right: 10px;
     padding-bottom: 20px;
-    /* Добавил отступ снизу */
     -webkit-overflow-scrolling: touch;
-    /* Для iOS */
 }
 
 /* --- ЛЕГЕНДА МЕТОК --- */
@@ -1467,4 +1465,220 @@ input[type="range"] {
     background-color: #fffde7 !important;
     border-color: var(--color-accent-dark) !important;
     color: var(--color-accent-dark);
+}
+
+/* --- Fuel Calculation Styles --- */
+.fuel-calc-section {
+    margin: 20px 0;
+    padding: 15px;
+    background: #fdfdfd;
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--border-radius-md);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start !important;
+}
+
+.fuel-calc-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-text-main);
+    text-align: left !important;
+}
+
+.fuel-inputs-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+}
+
+.fuel-input-group {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.fuel-input-group label {
+    font-size: 11px;
+    color: var(--color-text-faint);
+    white-space: nowrap;
+}
+
+.fuel-input-group input {
+    width: 100% !important;
+    padding: 8px !important;
+    border: 1px solid var(--color-border) !important;
+    border-radius: 4px !important;
+    font-size: 13px !important;
+}
+
+.fuel-calc-btn {
+    width: 100%;
+    padding: 10px;
+    background-color: var(--color-accent) !important;
+    color: var(--color-text-main) !important;
+    border: none !important;
+    border-radius: var(--border-radius-md);
+    font-weight: bold;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.fuel-calc-btn:hover {
+    background-color: var(--color-accent-dark) !important;
+}
+
+.fuel-disclaimer {
+    font-size: 10px;
+    color: var(--color-text-faint);
+    line-height: 1.3;
+    font-style: italic;
+    text-align: left !important;
+}
+
+/* --- Report Error Styles --- */
+.sidebar-report-btn {
+    width: 100%;
+    padding: 10px;
+    margin-top: 20px;
+    background-color: transparent !important;
+    color: #999 !important;
+    border: 1px dashed #ccc !important;
+    border-radius: var(--border-radius-md);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.sidebar-report-btn:hover {
+    background-color: #fff5f5 !important;
+    border-color: var(--color-danger) !important;
+    color: var(--color-danger) !important;
+}
+
+.balloon-report-err-btn {
+    position: absolute;
+    top: 5px;
+    right: 25px;
+    /* Чтобы не перекрывать крестик закрытия */
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #fff !important;
+    border: 1px solid #ff5252 !important;
+    color: #ff5252 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 10;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    padding: 0 !important;
+    min-height: auto !important;
+}
+
+.balloon-report-err-btn:hover {
+    background: #ff5252 !important;
+    color: #fff !important;
+}
+
+.report-station-name {
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 15px;
+    color: var(--color-text-main);
+    padding: 10px;
+    background: #f5f5f5;
+    border-radius: 8px;
+}
+
+.report-modal-content {
+    max-width: 450px !important;
+}
+
+.report-modal-content h2 {
+    padding: 20px !important;
+    text-align: left !important;
+    border-bottom: 1px solid var(--color-border-light) !important;
+    font-size: 20px !important;
+}
+
+#report-modal .modal-body {
+    padding: 20px 25px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    text-align: left !important;
+}
+
+#report-modal .input-group {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    width: 100% !important;
+    margin-bottom: 20px !important;
+}
+
+#report-modal .input-group label {
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    color: var(--color-text-faint) !important;
+    text-transform: uppercase !important;
+    margin-bottom: 8px !important;
+    text-align: left !important;
+    width: 100% !important;
+}
+
+.radio-group {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.radio-group label {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 12px !important;
+    font-size: 15px !important;
+    font-weight: 400 !important;
+    text-transform: none !important;
+    color: var(--color-text-main) !important;
+    cursor: pointer !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.radio-group input[type="radio"] {
+    width: 20px !important;
+    height: 20px !important;
+    margin: 0 !important;
+    flex-shrink: 0 !important;
+}
+
+#report-description {
+    width: 100% !important;
+    padding: 12px !important;
+    border: 1px solid var(--color-border) !important;
+    border-radius: var(--border-radius-md) !important;
+    font-family: inherit !important;
+    font-size: 15px !important;
+    resize: vertical !important;
+}
+
+#report-email {
+    width: 100% !important;
+    padding: 12px !important;
+    border: 1px solid var(--color-border) !important;
+    border-radius: var(--border-radius-md) !important;
+    font-size: 15px !important;
 }

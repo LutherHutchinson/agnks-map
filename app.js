@@ -37,6 +37,7 @@ let routeGeoJsonCoords = null;
 
 // Базовый маршрут (для сортировки заездов)
 let baseRouteGeoJsonCoords = null;
+let needsFuelPlanning = false;
 
 let originGeo = null;
 let destGeo = null;
@@ -326,7 +327,8 @@ async function loadStations() {
                 scheduleClean: scheduleLines.join('; ') || null,
                 phoneClean: phoneLines.join('; ') || null,
                 amenities: {
-                    around_the_clock: /круглосуточно|24\/7/i.test(scheduleLines.join('; '))
+                    around_the_clock: /круглосуточно|24\/7/i.test(scheduleLines.join('; ')),
+                    cng: true // Все заправки из этого файла — метановые
                 },
                 clusterCaption: item.properties.clusterCaption,
                 hintContent: nameClean,
@@ -364,6 +366,7 @@ function bindUIEvents() {
     document.getElementById('build-route').addEventListener('click', onBuildRouteClick);
     document.getElementById('reset-route').addEventListener('click', resetRoute);
     document.getElementById('btn-city-search').addEventListener('click', onCitySearchClick);
+    document.getElementById('build-route-fuel').addEventListener('click', onBuildRouteFuelClick);
 
     // Поиск при нажатии Enter в поле города
     document.getElementById('city-search').addEventListener('keypress', (e) => {
@@ -582,6 +585,32 @@ function bindUIEvents() {
     const saveRouteForm = document.getElementById('save-route-form');
     if (saveRouteForm) {
         saveRouteForm.addEventListener('submit', onSaveRouteSubmit);
+    }
+
+    // === Report Error Events ===
+    const sidebarReportBtn = document.getElementById('sidebar-report-error');
+    if (sidebarReportBtn) {
+        sidebarReportBtn.addEventListener('click', () => openReportModal());
+    }
+
+    const closeReportBtn = document.getElementById('close-report');
+    const reportModal = document.getElementById('report-modal');
+
+    if (closeReportBtn) {
+        closeReportBtn.addEventListener('click', closeReportModal);
+    }
+
+    if (reportModal) {
+        reportModal.addEventListener('click', (e) => {
+            if (e.target === reportModal) {
+                closeReportModal();
+            }
+        });
+    }
+
+    const reportForm = document.getElementById('report-form');
+    if (reportForm) {
+        reportForm.addEventListener('submit', submitErrorReport);
     }
 }
 
@@ -905,6 +934,7 @@ function onBuildRoute(fromInput, toInput) {
             window.closeSidebar();
         }
 
+        setStatus(`Маршрут рассчитан: ${originName} — ${destName}`);
         requestRouteAndRedraw();
         document.getElementById('reset-route').style.display = 'block';
 
@@ -914,6 +944,134 @@ function onBuildRoute(fromInput, toInput) {
     });
 }
 
+function onBuildRouteFuelClick() {
+    const fromInput = document.getElementById('route-from').value.trim();
+    const toInput = document.getElementById('route-to').value.trim();
+
+    if (!fromInput || !toInput) {
+        setStatus('Укажите оба пункта (Откуда и Куда)');
+        return;
+    }
+
+    needsFuelPlanning = true;
+    onBuildRoute(fromInput, toInput);
+}
+
+async function planFuelRoute() {
+    if (!routeGeoJsonCoords || routeGeoJsonCoords.length < 2) {
+        console.warn('Fuel Planning: No route coordinates available');
+        return;
+    }
+
+    const consumption = parseFloat(document.getElementById('fuel-consumption').value) || 10;
+    const tankVolume = parseFloat(document.getElementById('fuel-tank').value) || 20;
+    const initialPercent = parseFloat(document.getElementById('fuel-initial').value) || 50;
+
+    // Математический расчет запаса
+    const totalRange = (tankVolume / consumption) * 100;
+    const reserveRange = totalRange * 0.10; // 10% запаса
+    const usableRange = totalRange - reserveRange;
+
+    let currentPosOnRoute = 0;
+    let currentTankRange = (totalRange * (initialPercent / 100)) - reserveRange;
+
+    // Если начальный уровень топлива уже ниже 10%, мы должны заправиться немедленно (в пределах оставшегося топлива)
+    if (currentTankRange < 0) {
+        currentTankRange = (totalRange * (initialPercent / 100)); // Используем всё что есть до нуля
+    }
+
+    console.log(`Greedy Planning: Range=${totalRange.toFixed(1)}km, Usable=${usableRange.toFixed(1)}km, StartBudget=${currentTankRange.toFixed(1)}km`);
+    setStatus('Оптимальный расчет остановок...');
+
+    const baseLine = turf.lineString(routeGeoJsonCoords);
+    const totalDistKm = turf.length(baseLine, { units: 'kilometers' });
+
+    // 1. Собираем всех кандидатов в радиусе 15км от трассы
+    const allCngStations = allFeatures.filter(f => {
+        const props = f.properties;
+        return (props.amenities && props.amenities.cng) || (props.categories && props.categories.cng);
+    });
+
+    const candidates = [];
+    allCngStations.forEach(st => {
+        const [stLat, stLon] = st.geometry.coordinates;
+        const stPoint = turf.point([stLon, stLat]);
+
+        // Расстояние от заправки до всей линии маршрута
+        const distToLine = turf.pointToLineDistance(stPoint, baseLine, { units: 'kilometers' });
+        if (distToLine < 15) {
+            // Проецируем точку на линию, чтобы узнать расстояние от начала маршрута
+            const snapped = turf.nearestPointOnLine(baseLine, stPoint, { units: 'kilometers' });
+            candidates.push({
+                st,
+                dist: snapped.properties.location, // Дистанция от старта в км
+                coords: [stLat, stLon]
+            });
+        }
+    });
+
+    // Сортируем кандидатов по дистанции от начала
+    candidates.sort((a, b) => a.dist - b.dist);
+    console.log(`Found ${candidates.length} candidate stations near route.`);
+
+    const stopsToAdd = [];
+    let d = 0;
+    let budget = currentTankRange;
+    let lastStopDist = 0;
+
+    // Жадный алгоритм: идем как можно дальше
+    while (lastStopDist + budget < totalDistKm) {
+        const jumpLimit = lastStopDist + budget;
+
+        // Ищем самую дальнюю заправку в зоне досягаемости (budget)
+        let bestCandidate = null;
+        for (const cand of candidates) {
+            if (cand.dist > lastStopDist && cand.dist <= jumpLimit) {
+                if (!bestCandidate || cand.dist > bestCandidate.dist) {
+                    bestCandidate = cand;
+                }
+            }
+        }
+
+        if (!bestCandidate) {
+            // Разрыв слишком велик
+            console.warn(`Insufficient infrastructure at ${lastStopDist.toFixed(1)} km. Gap exceeds budget ${budget.toFixed(1)} km.`);
+            alert(`ВНИМАНИЕ: Маршрут не рекомендуется. Между станциями слишком большой разрыв в районе ${(lastStopDist + budget).toFixed(0)} км.`);
+            setStatus('Маршрут не рекомендуется (разрыв)');
+            break;
+        }
+
+        // Добавляем остановку
+        stopsToAdd.push({
+            id: String(bestCandidate.st.id),
+            name: bestCandidate.st.properties.nameClean,
+            lat: bestCandidate.coords[0],
+            lon: bestCandidate.coords[1]
+        });
+
+        lastStopDist = bestCandidate.dist;
+        budget = usableRange; // После заправки бюджет — полный бак минус 10%
+        console.log(`Selected stop: ${bestCandidate.st.properties.nameClean} at ${lastStopDist.toFixed(1)} km`);
+    }
+
+    if (stopsToAdd.length > 0) {
+        console.log(`Optimal stops found: ${stopsToAdd.length}`);
+        selectedWaypoints = [...selectedWaypoints, ...stopsToAdd];
+
+        // Итоговая сортировка (на всякий случай)
+        if (baseRouteGeoJsonCoords) {
+            const tempBaseLine = turf.lineString(baseRouteGeoJsonCoords);
+            selectedWaypoints.sort((a, b) => {
+                const locA = turf.nearestPointOnLine(tempBaseLine, turf.point([a.lon, a.lat])).properties.location || 0;
+                const locB = turf.nearestPointOnLine(tempBaseLine, turf.point([b.lon, b.lat])).properties.location || 0;
+                return locA - locB;
+            });
+        }
+        requestRouteAndRedraw();
+    } else if (lastStopDist + budget >= totalDistKm) {
+        setStatus('Заправок по пути не требуется.');
+    }
+}
 // Сброс маршрута
 function resetRoute() {
     originGeo = null;
@@ -994,6 +1152,11 @@ function requestRouteAndRedraw() {
         updateRouteSidebar();
         filterAndRenderStations();
         setStatus('Маршрут готов!');
+
+        if (needsFuelPlanning) {
+            needsFuelPlanning = false;
+            planFuelRoute();
+        }
 
         // Показываем кнопку "Сохранить маршрут" если маршрут готов
         if (currentUser) {
@@ -1522,6 +1685,7 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const isFav = favoriteStations.includes(stId);
 
     let html = `<div class="balloon-inner-content">`;
+    html += `<button class="balloon-report-err-btn" onclick="openReportModal('${stId}')" title="Сообщить об ошибке">⚠️</button>`;
     html += `<div class="station-header">${p.nameClean}</div>`;
 
     const statusMap = {
@@ -1918,16 +2082,25 @@ async function saveCurrentRoute(name) {
         return;
     }
 
+    // Проверка корректности координат (Yandex возвращает [lat, lon])
+    if (isNaN(originGeo[0]) || isNaN(originGeo[1]) || isNaN(destGeo[0]) || isNaN(destGeo[1])) {
+        alert('Ошибка в координатах маршрута. Попробуйте еще раз.');
+        console.error('Invalid coords for saving:', { originGeo, destGeo });
+        return;
+    }
+
     try {
         const newRoute = {
             user_id: currentUser.id,
             name: name || `Маршрут от ${new Date().toLocaleDateString()}`,
-            origin_name: originName,
-            dest_name: destName,
+            origin_name: originName || 'Точка А',
+            dest_name: destName || 'Точка Б',
             origin_coords: originGeo,
             dest_coords: destGeo,
-            waypoints: selectedWaypoints
+            waypoints: selectedWaypoints || []
         };
+
+        console.log('Saving route to Supabase...', newRoute);
 
         const { data, error } = await supabaseClient
             .from('saved_routes')
@@ -1938,13 +2111,14 @@ async function saveCurrentRoute(name) {
             savedRoutes.unshift(data[0]);
             renderSavedRoutes();
             closeSaveRouteModal();
-            console.log('Route saved successfully');
+            console.log('Route saved successfully:', data[0]);
         } else {
-            console.error('Error saving route:', error);
-            alert('Ошибка при сохранении маршрута');
+            console.error('Supabase error saving route:', error);
+            alert(`Ошибка при сохранении: ${error?.message || 'Неизвестная ошибка'}`);
         }
     } catch (e) {
         console.error('Save route exception:', e);
+        alert('Внутренняя ошибка при сохранении');
     }
 }
 
@@ -2312,6 +2486,134 @@ function goToStation(stId) {
     } else {
         // Если объект не в текущем вьюпорте или не загружен (маловероятно для ObjectManager)
         console.warn('Станция не найдена на карте:', stId);
+    }
+}
+
+// === РАБОТА С ОШИБКАМИ (REPORT ERROR) ===
+
+window.openReportModal = function (stationId = null) {
+    const modal = document.getElementById('report-modal');
+    const stationIdInput = document.getElementById('report-station-id');
+    const stationNameDiv = document.getElementById('report-station-name');
+    const emailInput = document.getElementById('report-email');
+    const typeContainer = document.getElementById('report-type-container');
+
+    // Сброс формы
+    document.getElementById('report-form').reset();
+    document.getElementById('report-error').style.display = 'none';
+    document.getElementById('report-success').style.display = 'none';
+
+    // Подготовка вариантов ошибок
+    let options = [];
+    if (stationId) {
+        options = [
+            { value: 'not_exists', text: 'Заправки не существует' },
+            { value: 'coordinates', text: 'Ошибка в координатах' },
+            { value: 'closed', text: 'Заправка закрыта/не работает' },
+            { value: 'other', text: 'Другое' }
+        ];
+    } else {
+        options = [
+            { value: 'price', text: 'Не указана заправка' },
+            { value: 'coordinates', text: 'Ошибка в координатах' },
+            { value: 'closed', text: 'Заправка закрыта/не работает' },
+            { value: 'other', text: 'Другое' }
+        ];
+    }
+
+    // Рендерим радио-кнопки
+    typeContainer.innerHTML = options.map((opt, index) => `
+        <label>
+            <input type="radio" name="error_type" value="${opt.value}" ${index === 0 ? 'required' : ''}>
+            ${opt.text}
+        </label>
+    `).join('');
+
+    if (stationId) {
+        stationIdInput.value = stationId;
+
+        // Находим название станции по ID
+        let stationName = 'Заправка';
+        const st = allFeatures.find(f => f.id === stationId);
+        if (st && st.properties && st.properties.nameClean) {
+            stationName = st.properties.nameClean;
+        }
+
+        stationNameDiv.innerText = `Станция: ${stationName}`;
+        stationNameDiv.style.display = 'block';
+    } else {
+        stationIdInput.value = '';
+        stationNameDiv.style.display = 'none';
+    }
+
+    if (currentUser?.email) {
+        emailInput.value = currentUser.email;
+    }
+
+    modal.style.display = 'flex';
+};
+
+function closeReportModal() {
+    document.getElementById('report-modal').style.display = 'none';
+}
+
+async function submitErrorReport(e) {
+    e.preventDefault();
+
+    if (!supabaseClient) {
+        alert('Система отправки ошибок не настроена.');
+        return;
+    }
+
+    const submitBtn = document.getElementById('report-submit-btn');
+    const errorEl = document.getElementById('report-error');
+    const successEl = document.getElementById('report-success');
+
+    const stationId = document.getElementById('report-station-id').value;
+    const errorType = document.querySelector('input[name="error_type"]:checked')?.value;
+    const description = document.getElementById('report-description').value;
+    const email = document.getElementById('report-email').value;
+
+    if (!errorType) {
+        errorEl.innerText = 'Выберите тип ошибки';
+        errorEl.style.display = 'block';
+        return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.innerText = 'Отправка...';
+    errorEl.style.display = 'none';
+
+    try {
+        const { error } = await supabaseClient
+            .from('error_reports')
+            .insert([{
+                station_id: stationId || null,
+                error_type: errorType,
+                description: description,
+                author_email: email,
+                user_id: currentUser?.id || null
+            }]);
+
+        if (error) throw error;
+
+        successEl.innerText = 'Спасибо! Информация отправлена на модерацию.';
+        successEl.style.display = 'block';
+        document.getElementById('report-form').style.display = 'none';
+
+        setTimeout(() => {
+            closeReportModal();
+            // Сбрасываем видимость формы для следующего раза
+            document.getElementById('report-form').style.display = 'block';
+        }, 3000);
+
+    } catch (err) {
+        console.error('Error submitting report:', err);
+        errorEl.innerText = 'Ошибка при отправке: ' + err.message;
+        errorEl.style.display = 'block';
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Отправить';
     }
 }
 
