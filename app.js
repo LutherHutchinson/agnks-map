@@ -107,6 +107,12 @@ async function init() {
     initBottomSheetResize();
     bindUIEvents();
     initAuth();
+
+    // Подписка на реальное время + поллинг-фолбек
+    if (supabaseClient) {
+        subscribeToComments();
+        setInterval(fetchComments, 1000); // Поллинг каждые 20 секунд
+    }
 }
 
 // Загрузка базы станций
@@ -663,6 +669,11 @@ async function initAuth() {
     currentUser = session?.user || null;
     updateAuthUI();
 
+    if (supabaseClient) {
+        await fetchComments();
+        subscribeToComments(); // Подписка на новые отзывы
+    }
+
     if (currentUser) {
         await fetchFavorites();
         await fetchSavedRoutes(); // Добавлено
@@ -901,6 +912,8 @@ async function onCitySearchClick() {
         setStatus('Ошибка при поиске города');
     }
 }
+
+
 
 function onBuildRoute(fromInput, toInput) {
     setStatus('Геокодирование адресов...');
@@ -1685,7 +1698,6 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
     const isFav = favoriteStations.includes(stId);
 
     let html = `<div class="balloon-inner-content">`;
-    html += `<button class="balloon-report-err-btn" onclick="openReportModal('${stId}')" title="Сообщить об ошибке">⚠️</button>`;
     html += `<div class="station-header">${p.nameClean}</div>`;
 
     const statusMap = {
@@ -1773,25 +1785,31 @@ function buildBalloonHtml(feature, latS, lonS, stId, isRouteActive) {
         </div>
     `;
 
+    // Группа кнопок действий
+    html += `<div class="balloon-actions">`;
+
     if (isRouteActive) {
         const alreadyAdded = selectedWaypoints.some(w => w.id == stId);
-
         html += alreadyAdded
-            ? `<button class="yandex-link-btn" disabled>✓ Добавлена в маршрут</button>`
-            : `<button class="yandex-link-btn" onclick="addStationToRoute('${stId}')">➕ Заехать сюда по пути</button>`;
+            ? `<button class="yandex-link-btn" disabled>✓ Добавлена</button>`
+            : `<button class="yandex-link-btn" onclick="addStationToRoute('${stId}')">➕ Заехать сюда</button>`;
     } else {
-        html += `<a href="${singleNavLink}" target="_blank" class="yandex-link-btn">Отправиться сюда</a>`;
+        html += `<a href="${singleNavLink}" target="_blank" class="yandex-link-btn">🚗 Отправиться сюда</a>`;
     }
 
     // Кнопка Избранного
     html += `
-        <button class="yandex-link-btn-secondary fav-btn-balloon ${isFav ? 'active' : ''}" 
-                onclick="toggleFavorite('${stId}')">
-            ${isFav ? '⭐ В избранном' : '☆ В избранное'}
+        <button class="fav-btn-balloon ${isFav ? 'active' : ''}" onclick="toggleFavorite('${stId}')" title="${isFav ? 'Убрать из избранного' : 'В избранное'}">
+            ${isFav ? '⭐' : '☆'}
         </button>
     `;
 
-    html += `<button class="yandex-link-btn" onclick="window.open('${placeLink}', '_blank')" style="margin-top: 10px; background-color: #f5f5f5; color: #333; border: 1px solid #ccc;">Посмотреть на Яндекс Картах</button>`;
+    // Кнопка репорта (⚠️)
+    html += `<button class="balloon-report-err-btn" onclick="openReportModal('${stId}')" title="Сообщить об ошибке">⚠️</button>`;
+
+    html += `</div>`; // .balloon-actions
+
+    html += `<button class="yandex-link-btn-secondary" onclick="window.open('${placeLink}', '_blank')" style="margin-top: 10px;">🗺️ Посмотреть на Яндекс Картах</button>`;
 
     // Кнопка добавления отзыва в самом низу
     html += `
@@ -1942,6 +1960,15 @@ async function fetchComments() {
                 });
             });
             console.log('Comments loaded from Supabase');
+
+            // После загрузки проверяем, не открыт ли какой-то балун прямо сейчас
+            // Если открыт — обновляем в нем список отзывов
+            const openCommentsLists = document.querySelectorAll('div[id^="comments-list-"]');
+            openCommentsLists.forEach(list => {
+                const stId = list.id.replace('comments-list-', '');
+                console.log(`Polling: refreshing open balloon for station ${stId}`);
+                list.innerHTML = buildCommentsHtml(stId);
+            });
         } else if (error) {
             console.warn('Supabase fetch error:', error);
         }
@@ -1963,6 +1990,7 @@ function buildCommentsHtml(stationId) {
                 ${c.author_email ? `<span class="comment-author" title="${c.author_email}">${c.author_email.split('@')[0]}</span> • ` : ''}
                 ${c.date}
             </div>
+            ${c.id && c.id.length > 5 ? `<div style="display:none" class="comment-id-marker" data-id="${c.id}"></div>` : ''}
         </div>
     `).join('');
 }
@@ -2015,9 +2043,8 @@ async function onCommentSubmit(stationId) {
                 author_email: currentUser?.email || null
             });
 
-            // Перерисовываем список отзывов
-            const list = document.getElementById(`comments-list-${stationId}`);
-            if (list) list.innerHTML = buildCommentsHtml(stationId);
+            // Перерисовываем весь балун, чтобы обновить состояние (новости, флаги и т.д.)
+            objectManager.objects.balloon.setData(objectManager.objects.getById(stationId));
 
             // Скрываем форму обратно
             toggleCommentForm(stationId);
@@ -2466,7 +2493,7 @@ async function toggleFavorite(stId) {
     if (btn) {
         const isFav = favoriteStations.includes(stId);
         btn.classList.toggle('active', isFav);
-        btn.innerHTML = isFav ? '⭐ В избранном' : '☆ В избранное';
+        btn.innerHTML = isFav ? '⭐' : '☆';
     }
 }
 
@@ -2621,3 +2648,44 @@ async function submitErrorReport(e) {
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(filterAndRenderStations, 1000); // Даем время на загрузку данных
 });
+
+// Подписка на новые комментарии в реальном времени
+function subscribeToComments() {
+    if (!supabaseClient) return;
+
+    console.log('Subscribing to real-time comments...');
+
+    supabaseClient
+        .channel('public:comments')
+        .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'comments'
+        }, payload => {
+            console.log('New comment received via Realtime:', payload.new);
+            const newComment = payload.new;
+            const stId = newComment.station_id;
+
+            // Обновляем локальный кэш
+            if (!userComments[stId]) userComments[stId] = [];
+
+            // Проверяем, нет ли уже такого комментария (чтобы не дублировать для автора)
+            const exists = userComments[stId].some(c => c.id === newComment.id);
+            if (!exists) {
+                userComments[stId].push({
+                    id: newComment.id,
+                    text: newComment.text,
+                    date: newComment.date,
+                    author: newComment.author_email || 'Аноним'
+                });
+
+                // Обновляем UI, если открыт балун именно этой заправки
+                const list = document.getElementById(`comments-list-${stId}`);
+                if (list) {
+                    console.log(`Updating comments list for station ${stId}`);
+                    list.innerHTML = buildCommentsHtml(stId);
+                }
+            }
+        })
+        .subscribe();
+}
