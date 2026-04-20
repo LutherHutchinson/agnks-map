@@ -114,7 +114,7 @@ async function init() {
     // Подписка на реальное время + поллинг-фолбек
     if (supabaseClient) {
         subscribeToComments();
-        setInterval(fetchComments, 1000); // Поллинг каждые 20 секунд
+        setInterval(fetchComments, 30000); // Поллинг каждые 30 секунд
     }
 }
 
@@ -388,14 +388,14 @@ function bindUIEvents() {
 
     // Добавление промежуточных точек и обновление коннекторов
     let viaPointCount = 0;
-    
+
     function renderConnectors() {
         document.querySelectorAll('.route-connector-row').forEach(el => el.remove());
-        
+
         const originWrapper = document.getElementById('origin-wrapper');
         const destWrapper = document.getElementById('dest-wrapper');
         const viaContainer = document.getElementById('via-points-container');
-        
+
         const createConnector = (topEl, bottomEl, insertIndex) => {
             const row = document.createElement('div');
             row.className = 'route-connector-row';
@@ -403,16 +403,16 @@ function bindUIEvents() {
                 <button type="button" class="connector-swap-btn" title="Поменять местами">⇅</button>
                 <button type="button" class="connector-add-btn" title="Добавить промежуточный город">➕</button>
             `;
-            
+
             row.querySelector('.connector-swap-btn').addEventListener('click', () => {
                 const topInput = topEl.querySelector('input[type="text"]');
                 const bottomInput = bottomEl.querySelector('input[type="text"]');
-                
+
                 const tempVal = topInput.value;
                 topInput.value = bottomInput.value;
                 bottomInput.value = tempVal;
             });
-            
+
             row.querySelector('.connector-add-btn').addEventListener('click', () => {
                 viaPointCount++;
                 const wrapper = document.createElement('div');
@@ -423,34 +423,34 @@ function bindUIEvents() {
                 wrapper.style.width = '100%';
                 wrapper.style.marginBottom = '12px';
                 wrapper.style.position = 'relative';
-                
+
                 wrapper.innerHTML = `
                     <input type="text" id="route-via-${viaPointCount}" class="via-point-input" placeholder="Через (промежуточная точка)" style="width: 100%; flex-grow: 1; min-width: 0; margin-bottom: 0;">
                     <button type="button" class="remove-via-btn" title="Удалить точку" style="margin-bottom: 0;">✖</button>
                 `;
-                
+
                 const currentVias = viaContainer.querySelectorAll('.via-point-group');
                 if (insertIndex < currentVias.length) {
                     viaContainer.insertBefore(wrapper, currentVias[insertIndex]);
                 } else {
                     viaContainer.appendChild(wrapper);
                 }
-                
+
                 initCustomSuggest(`route-via-${viaPointCount}`);
-                
+
                 wrapper.querySelector('.remove-via-btn').addEventListener('click', () => {
                     viaContainer.removeChild(wrapper);
                     renderConnectors();
                 });
-                
+
                 renderConnectors();
             });
-            
+
             return row;
         };
 
         const viaGroups = Array.from(viaContainer.children);
-        
+
         // 1. Between origin and first via/dest
         const firstConnector = createConnector(originWrapper, viaGroups.length ? viaGroups[0] : destWrapper, 0);
         originWrapper.parentNode.insertBefore(firstConnector, originWrapper.nextSibling);
@@ -991,7 +991,7 @@ function onBuildRoute(fromInput, toInput, viaInputs = []) {
         destGeo = toGeoObj.geometry.getCoordinates();
         originName = fromInput;
         destName = toInput;
-        
+
         userViaPoints = [];
         for (let i = 0; i < viaInputs.length; i++) {
             const viaObj = results[i + 1].geoObjects.get(0);
@@ -1177,12 +1177,12 @@ function resetRoute() {
 
     document.getElementById('route-from').value = '';
     document.getElementById('route-to').value = '';
-    
+
     const viaContainer = document.getElementById('via-points-container');
     if (viaContainer) {
         viaContainer.innerHTML = ''; // Очищаем все добавленные точки
     }
-    
+
     document.getElementById('status').innerText = '';
     document.getElementById('reset-route').style.display = 'none';
     document.getElementById('save-route-btn').style.display = 'none'; // Скрываем и эту кнопку
@@ -2058,14 +2058,44 @@ async function fetchComments() {
     if (!supabaseClient) return;
 
     try {
-        const { data, error } = await supabaseClient
-            .from('comments')
-            .select('id, station_id, text, date, author_email')
-            .order('created_at', { ascending: true });
+        let allData = [];
+        let from = 0;
+        let to = 999;
+        let finished = false;
 
-        if (!error && data) {
+        console.log('[Supabase] Start multi-page fetch...');
+
+        while (!finished) {
+            const { data, error } = await supabaseClient
+                .from('comments')
+                .select('id, station_id, text, date, author_email')
+                .order('created_at', { ascending: false })
+                .range(from, to);
+
+            if (error) {
+                console.error('Supabase fetch error:', error);
+                break;
+            }
+
+            if (data && data.length > 0) {
+                allData = allData.concat(data);
+                if (data.length < 1000) {
+                    finished = true;
+                } else {
+                    from += 1000;
+                    to += 1000;
+                }
+            } else {
+                finished = true;
+            }
+            
+            // Защита от бесконечного цикла
+            if (from > 10000) break; 
+        }
+
+        if (allData.length > 0) {
             userComments = {};
-            data.forEach(c => {
+            allData.forEach(c => {
                 if (!userComments[c.station_id]) userComments[c.station_id] = [];
                 userComments[c.station_id].push({
                     text: c.text,
@@ -2073,16 +2103,19 @@ async function fetchComments() {
                     author_email: c.author_email
                 });
             });
-            console.log('Comments loaded from Supabase');
+            window.totalCommentsLoaded = allData.length;
+            console.log(`[Supabase] Total loaded: ${allData.length} comments.`);
 
-            // После загрузки проверяем, не открыт ли какой-то балун прямо сейчас
-            // Если открыт — обновляем в нем список отзывов
+            // После загрузки обновляем открытые и закрытые баллоны
             const openCommentsLists = document.querySelectorAll('div[id^="comments-list-"]');
             openCommentsLists.forEach(list => {
                 const stId = list.id.replace('comments-list-', '');
                 console.log(`Polling: refreshing open balloon for station ${stId}`);
                 list.innerHTML = buildCommentsHtml(stId);
             });
+
+            // Принудительно обновляем все баллоны на карте, чтобы в них появились отзывы
+            filterAndRenderStations();
         } else if (error) {
             console.warn('Supabase fetch error:', error);
         }
@@ -2096,8 +2129,8 @@ function buildCommentsHtml(stationId) {
     if (comments.length === 0) {
         return '<div class="no-comments">Пока нет отзывов. Будьте первым!</div>';
     }
-    // Копируем и разворачиваем, чтобы самые новые были сверху
-    return comments.slice().reverse().map(c => `
+    // Отображаем как есть (уже отсортировано от новых к старым при загрузке)
+    return comments.map(c => `
         <div class="comment-item">
             <div class="comment-text">${escapeHtml(c.text)}</div>
             <div class="comment-meta">
