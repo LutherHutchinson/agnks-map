@@ -52,19 +52,20 @@
             маршруты</button>
 
         <!-- Ввод маршрута -->
-        <div class="route-inputs">
-            <div class="input-wrapper">
+        <div class="route-inputs" id="route-inputs-container">
+            <div class="input-wrapper" id="origin-wrapper">
                 <input type="text" id="route-from" placeholder="Откуда">
                 <button id="my-loc-from" class="my-loc-btn" title="Моё местоположение">📍</button>
             </div>
 
-            <button id="swap-locations" class="swap-btn" title="Поменять местами">⇅</button>
+            <div id="via-points-container" style="width: 100%; display: block;"></div>
 
-            <div class="input-wrapper">
+            <div class="input-wrapper" id="dest-wrapper">
                 <input type="text" id="route-to" placeholder="Куда">
                 <button id="my-loc-to" class="my-loc-btn" title="Моё местоположение">📍</button>
             </div>
         </div>
+
         <button id="build-route">Проложить маршрут</button>
 
         <div class="fuel-calc-section">

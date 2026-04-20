@@ -44,6 +44,9 @@ let destGeo = null;
 let originName = '';
 let destName = '';
 
+// Промежуточные города
+let userViaPoints = [];
+
 // Остановки пользователя
 let selectedWaypoints = [];
 
@@ -383,31 +386,84 @@ function bindUIEvents() {
     document.getElementById('my-loc-from').addEventListener('click', () => useMyLocation('route-from'));
     document.getElementById('my-loc-to').addEventListener('click', () => useMyLocation('route-to'));
 
-    // Кнопка смены мест А и Б
-    document.getElementById('swap-locations').addEventListener('click', () => {
-        const fromInput = document.getElementById('route-from');
-        const toInput = document.getElementById('route-to');
+    // Добавление промежуточных точек и обновление коннекторов
+    let viaPointCount = 0;
+    
+    function renderConnectors() {
+        document.querySelectorAll('.route-connector-row').forEach(el => el.remove());
+        
+        const originWrapper = document.getElementById('origin-wrapper');
+        const destWrapper = document.getElementById('dest-wrapper');
+        const viaContainer = document.getElementById('via-points-container');
+        
+        const createConnector = (topEl, bottomEl, insertIndex) => {
+            const row = document.createElement('div');
+            row.className = 'route-connector-row';
+            row.innerHTML = `
+                <button type="button" class="connector-swap-btn" title="Поменять местами">⇅</button>
+                <button type="button" class="connector-add-btn" title="Добавить промежуточный город">➕</button>
+            `;
+            
+            row.querySelector('.connector-swap-btn').addEventListener('click', () => {
+                const topInput = topEl.querySelector('input[type="text"]');
+                const bottomInput = bottomEl.querySelector('input[type="text"]');
+                
+                const tempVal = topInput.value;
+                topInput.value = bottomInput.value;
+                bottomInput.value = tempVal;
+            });
+            
+            row.querySelector('.connector-add-btn').addEventListener('click', () => {
+                viaPointCount++;
+                const wrapper = document.createElement('div');
+                wrapper.className = 'via-point-group';
+                wrapper.style.display = 'flex';
+                wrapper.style.gap = '8px';
+                wrapper.style.alignItems = 'stretch';
+                wrapper.style.width = '100%';
+                wrapper.style.marginBottom = '12px';
+                wrapper.style.position = 'relative';
+                
+                wrapper.innerHTML = `
+                    <input type="text" id="route-via-${viaPointCount}" class="via-point-input" placeholder="Через (промежуточная точка)" style="width: 100%; flex-grow: 1; min-width: 0; margin-bottom: 0;">
+                    <button type="button" class="remove-via-btn" title="Удалить точку" style="margin-bottom: 0;">✖</button>
+                `;
+                
+                const currentVias = viaContainer.querySelectorAll('.via-point-group');
+                if (insertIndex < currentVias.length) {
+                    viaContainer.insertBefore(wrapper, currentVias[insertIndex]);
+                } else {
+                    viaContainer.appendChild(wrapper);
+                }
+                
+                initCustomSuggest(`route-via-${viaPointCount}`);
+                
+                wrapper.querySelector('.remove-via-btn').addEventListener('click', () => {
+                    viaContainer.removeChild(wrapper);
+                    renderConnectors();
+                });
+                
+                renderConnectors();
+            });
+            
+            return row;
+        };
 
-        // Меняем текст в инпутах
-        const tempVal = fromInput.value;
-        fromInput.value = toInput.value;
-        toInput.value = tempVal;
+        const viaGroups = Array.from(viaContainer.children);
+        
+        // 1. Between origin and first via/dest
+        const firstConnector = createConnector(originWrapper, viaGroups.length ? viaGroups[0] : destWrapper, 0);
+        originWrapper.parentNode.insertBefore(firstConnector, originWrapper.nextSibling);
 
-        // Меняем глобальные переменные координат
-        const tempGeo = originGeo;
-        originGeo = destGeo;
-        destGeo = tempGeo;
-
-        // Меняем сохраненные названия
-        const tempName = originName;
-        originName = destName;
-        destName = tempName;
-
-        // Если оба пункта заданы — перестраиваем маршрут
-        if (originGeo && destGeo) {
-            buildRoute(originGeo, destGeo);
+        // 2. Between vias, and between last via and dest
+        for (let i = 0; i < viaGroups.length; i++) {
+            const nextEl = i === viaGroups.length - 1 ? destWrapper : viaGroups[i + 1];
+            const conn = createConnector(viaGroups[i], nextEl, i + 1);
+            viaGroups[i].parentNode.insertBefore(conn, viaGroups[i].nextSibling);
         }
-    });
+    }
+
+    renderConnectors();
 
     // Фильтр по удобствам — кнопка раскрытия
     document.getElementById('amenity-toggle').addEventListener('click', function () {
@@ -877,11 +933,11 @@ function onBuildRouteClick() {
         return;
     }
 
-    // Если пользователь нажал проложить маршрут, а заполнено только поле Откуда — 
-    // возможно он просто хочет найти этот город, если поле Куда пустое.
-    // Но мы добавили отдельный поиск, так что просто просим оба поля.
+    const viaInputs = Array.from(document.querySelectorAll('.via-point-input'))
+        .map(input => input.value.trim())
+        .filter(val => val !== '');
 
-    onBuildRoute(fromInput, toInput);
+    onBuildRoute(fromInput, toInput, viaInputs);
 }
 
 /** Поиск и переход к городу */
@@ -913,17 +969,18 @@ async function onCitySearchClick() {
     }
 }
 
-
-
-function onBuildRoute(fromInput, toInput) {
+function onBuildRoute(fromInput, toInput, viaInputs = []) {
     setStatus('Геокодирование адресов...');
 
-    Promise.all([
+    const geocodePromises = [
         ymaps.geocode(fromInput),
+        ...viaInputs.map(v => ymaps.geocode(v)),
         ymaps.geocode(toInput)
-    ]).then(function (results) {
+    ];
+
+    Promise.all(geocodePromises).then(function (results) {
         const fromGeoObj = results[0].geoObjects.get(0);
-        const toGeoObj = results[1].geoObjects.get(0);
+        const toGeoObj = results[results.length - 1].geoObjects.get(0);
 
         if (!fromGeoObj || !toGeoObj) {
             setStatus('Город не найден. Проверьте написание.');
@@ -934,6 +991,19 @@ function onBuildRoute(fromInput, toInput) {
         destGeo = toGeoObj.geometry.getCoordinates();
         originName = fromInput;
         destName = toInput;
+        
+        userViaPoints = [];
+        for (let i = 0; i < viaInputs.length; i++) {
+            const viaObj = results[i + 1].geoObjects.get(0);
+            if (viaObj) {
+                const coords = viaObj.geometry.getCoordinates();
+                userViaPoints.push({
+                    lat: coords[0],
+                    lon: coords[1],
+                    name: viaInputs[i]
+                });
+            }
+        }
 
         // Сбрасываем предыдущие заезды при новом маршруте
         selectedWaypoints = [];
@@ -966,8 +1036,12 @@ function onBuildRouteFuelClick() {
         return;
     }
 
+    const viaInputs = Array.from(document.querySelectorAll('.via-point-input'))
+        .map(input => input.value.trim())
+        .filter(val => val !== '');
+
     needsFuelPlanning = true;
-    onBuildRoute(fromInput, toInput);
+    onBuildRoute(fromInput, toInput, viaInputs);
 }
 
 async function planFuelRoute() {
@@ -1091,6 +1165,7 @@ function resetRoute() {
     destGeo = null;
     originName = '';
     destName = '';
+    userViaPoints = [];
     selectedWaypoints = [];
     routeGeoJsonCoords = null;
     baseRouteGeoJsonCoords = null;
@@ -1102,6 +1177,12 @@ function resetRoute() {
 
     document.getElementById('route-from').value = '';
     document.getElementById('route-to').value = '';
+    
+    const viaContainer = document.getElementById('via-points-container');
+    if (viaContainer) {
+        viaContainer.innerHTML = ''; // Очищаем все добавленные точки
+    }
+    
     document.getElementById('status').innerText = '';
     document.getElementById('reset-route').style.display = 'none';
     document.getElementById('save-route-btn').style.display = 'none'; // Скрываем и эту кнопку
@@ -1116,9 +1197,23 @@ function requestRouteAndRedraw() {
 
     setStatus('Прокладываю маршрут…');
 
+    let allStops = [];
+    userViaPoints.forEach(v => allStops.push({ type: 'via', lat: v.lat, lon: v.lon, name: v.name }));
+    selectedWaypoints.forEach((w, index) => allStops.push({ type: 'gas', lat: w.lat, lon: w.lon, name: w.name, gasIndex: index }));
+
+    // Если есть базовый маршрут, отсортируем все остановки по расстоянию вдоль него
+    if (baseRouteGeoJsonCoords) {
+        const tempBaseLine = turf.lineString(baseRouteGeoJsonCoords);
+        allStops.sort((a, b) => {
+            const locA = turf.nearestPointOnLine(tempBaseLine, turf.point([a.lon, a.lat])).properties.location || 0;
+            const locB = turf.nearestPointOnLine(tempBaseLine, turf.point([b.lon, b.lat])).properties.location || 0;
+            return locA - locB;
+        });
+    }
+
     const routePoints = [
         originGeo,
-        ...selectedWaypoints.map(wp => ({ type: 'wayPoint', point: [wp.lat, wp.lon] })),
+        ...allStops.map(s => ({ type: 'wayPoint', point: [s.lat, s.lon] })),
         destGeo
     ];
 
@@ -1195,25 +1290,44 @@ function updateRouteSidebar() {
 
     container.style.display = 'block';
 
+    let allStops = [];
+    userViaPoints.forEach(v => allStops.push({ type: 'via', lat: v.lat, lon: v.lon, name: v.name }));
+    selectedWaypoints.forEach((w, index) => allStops.push({ type: 'gas', lat: w.lat, lon: w.lon, name: w.name, gasIndex: index }));
+
+    if (baseRouteGeoJsonCoords) {
+        const tempBaseLine = turf.lineString(baseRouteGeoJsonCoords);
+        allStops.sort((a, b) => {
+            const locA = turf.nearestPointOnLine(tempBaseLine, turf.point([a.lon, a.lat])).properties.location || 0;
+            const locB = turf.nearestPointOnLine(tempBaseLine, turf.point([b.lon, b.lat])).properties.location || 0;
+            return locA - locB;
+        });
+    }
+
     // Показываем/скрываем заголовок "Заезды по пути"
     const titleEl = document.getElementById('waypoints-title');
     if (titleEl) {
-        titleEl.style.display = selectedWaypoints.length > 0 ? 'block' : 'none';
+        titleEl.style.display = allStops.length > 0 ? 'block' : 'none';
     }
 
     listEl.innerHTML = '';
 
     const rtextParts = [`${originGeo[0]},${originGeo[1]}`];
 
-    selectedWaypoints.forEach((wp, index) => {
+    allStops.forEach((wp, index) => {
         rtextParts.push(`${wp.lat},${wp.lon}`);
 
         const stopEl = document.createElement('div');
         stopEl.className = 'route-stop';
-        stopEl.innerHTML = `
-            <div class="route-stop-title">${index + 1}. ${wp.name}</div>
-            <button class="remove-btn" onclick="removeStation(${index})" title="Удалить">✖</button>
-        `;
+        if (wp.type === 'gas') {
+            stopEl.innerHTML = `
+                <div class="route-stop-title">${index + 1}. ${wp.name}</div>
+                <button class="remove-btn" onclick="removeStation(${wp.gasIndex})" title="Удалить">✖</button>
+            `;
+        } else {
+            stopEl.innerHTML = `
+                <div class="route-stop-title">${index + 1}. ${wp.name} (Город/Адрес)</div>
+            `;
+        }
         listEl.appendChild(stopEl);
     });
 

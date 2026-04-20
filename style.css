@@ -104,14 +104,22 @@ h3 {
 }
 
 .my-loc-btn {
-    width: auto;
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
     flex-shrink: 0;
-    padding: 10px 12px;
+    padding: 0 !important;
     background-color: var(--color-border-light);
     border: 1px solid var(--color-border);
     font-size: 16px;
     color: var(--color-text-main);
     z-index: 10003;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* Классы для эффекта "выпадения" подсказок */
@@ -183,15 +191,19 @@ button {
     flex-direction: column;
 }
 
-.swap-btn {
+.route-connector-row {
+    position: relative;
+    height: 0;
+    z-index: 10;
+}
+
+.connector-swap-btn, .connector-add-btn {
     position: absolute;
-    right: 44px;
-    top: 36px;
+    top: -14px;
     width: 28px !important;
     height: 28px !important;
     padding: 0 !important;
     margin: 0 !important;
-    z-index: 10;
     background: white !important;
     border: 1px solid var(--color-border) !important;
     border-radius: 50% !important;
@@ -199,12 +211,21 @@ button {
     align-items: center;
     justify-content: center;
     color: var(--color-primary) !important;
+    font-size: 14px;
     cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     transition: all 0.2s ease;
 }
 
-.swap-btn:hover {
+.connector-swap-btn {
+    left: -14px;
+}
+
+.connector-add-btn {
+    right: 44px;
+}
+
+.connector-swap-btn:hover, .connector-add-btn:hover {
     background: #f5f5f5 !important;
     transform: scale(1.1);
     box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
@@ -1698,4 +1719,67 @@ input[type="range"] {
     border: 1px solid var(--color-border) !important;
     border-radius: var(--border-radius-md) !important;
     font-size: 15px !important;
+}
+
+/* Стили для промежуточных точек (городов) */
+.add-via-btn {
+    width: 100%;
+    margin-bottom: 20px;
+    padding: 10px;
+    background-color: transparent;
+    color: var(--color-primary);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--border-radius-lg);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.add-via-btn:hover {
+    background-color: var(--color-bg-hover);
+    border-color: var(--color-primary);
+}
+
+.via-point-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    width: 100%;
+}
+
+.via-point-group .input-wrapper {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.via-point-group .input-wrapper input[type="text"] {
+    width: 100%;
+}
+
+.remove-via-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+    flex-shrink: 0;
+    padding: 0 !important;
+    background-color: var(--color-border-light);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-md);
+    font-size: 16px;
+    color: var(--color-danger);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.remove-via-btn:hover {
+    background-color: var(--color-danger);
+    color: white;
 }
