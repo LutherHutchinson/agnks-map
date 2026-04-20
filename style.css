@@ -1533,21 +1533,24 @@ input[type="range"] {
 
 .fuel-inputs-row {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap; /* Разрешаем перенос на новую строку */
+    gap: 12px;
     width: 100%;
 }
 
 .fuel-input-group {
-    flex: 1;
+    flex: 1 1 80px; /* Позволяем расти и сжиматься, но минимум 80px */
     display: flex;
     flex-direction: column;
     gap: 4px;
+    min-width: 0; /* Важно для flex-контейнеров */
 }
 
 .fuel-input-group label {
     font-size: 11px;
     color: var(--color-text-faint);
-    white-space: nowrap;
+    line-height: 1.2;
+    /* Убираем white-space: nowrap, чтобы текст мог переноситься */
 }
 
 .fuel-input-group input {
