@@ -301,7 +301,13 @@ async function loadStations() {
 
     // Нормализация данных стандартной станции
     function parseStation(item) {
-        const nameClean = stripHtml(item.properties.hintContent || 'АГНКС');
+        let nameRaw = item.properties.hintContent || item.properties.balloonContentHeader || 'АГНКС';
+        let nameClean = stripHtml(nameRaw);
+        
+        // Если имя слишком короткое или стандартное, пробуем взять заголовок балуна
+        if (nameClean === 'АГНКС' && item.properties.balloonContentHeader) {
+            nameClean = stripHtml(item.properties.balloonContentHeader);
+        }
 
         // Сохраняем разрывы строк перед strip
         const rawBody = (item.properties.balloonContentBody || '')
@@ -651,9 +657,12 @@ function bindUIEvents() {
                 errorEl.innerText = translateAuthError(err.message);
                 errorEl.style.display = 'block';
             } finally {
-
                 submitBtn.disabled = false;
-                submitBtn.innerText = originalText;
+                // Вместо восстановления старого текста, обновляем его согласно текущему режиму
+                if (authMode === 'login') submitBtn.innerText = 'Войти';
+                else if (authMode === 'register') submitBtn.innerText = 'Создать аккаунт';
+                else if (authMode === 'reset-password') submitBtn.innerText = 'Отправить письмо';
+                else if (authMode === 'update-password') submitBtn.innerText = 'Сохранить';
             }
         });
     }
