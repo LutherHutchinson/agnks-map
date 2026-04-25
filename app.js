@@ -92,7 +92,16 @@ const api = {
 };
 
 
-ymaps.ready(init);
+// Ждем загрузки динамического скрипта Яндекс.Карт
+function waitForYmaps() {
+    if (typeof ymaps !== 'undefined' && ymaps.ready) {
+        ymaps.ready(init);
+    } else {
+        setTimeout(waitForYmaps, 100);
+    }
+}
+waitForYmaps();
+
 
 async function init() {
     myMap = new ymaps.Map('map', {

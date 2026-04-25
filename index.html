@@ -10,7 +10,17 @@
 
     <!-- Конфигурация (ключи) -->
     <script src="config.js"></script>
-    <script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=4cbfaf8b-d283-4707-9202-48bee10192af" type="text/javascript"></script>
+    <script type="text/javascript">
+        // Динамическая загрузка Яндекс.Карт с использованием ключа из конфига
+        (function() {
+            const apiKey = (typeof CONFIG !== 'undefined' && CONFIG.YANDEX_MAPS_API_KEY) ? CONFIG.YANDEX_MAPS_API_KEY : '';
+            const script = document.createElement('script');
+            script.type = 'text/javascript';
+            script.src = `https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=${apiKey}`;
+            document.head.appendChild(script);
+        })();
+    </script>
+
 
     <!-- Turf.js -->
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
