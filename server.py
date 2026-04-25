@@ -25,10 +25,10 @@ PG_HOST = os.environ.get('PGHOST', 'localhost')
 PG_PORT = os.environ.get('PGPORT', '5432')
 PG_DB = os.environ.get('PGDATABASE', 'agnks_db')
 PG_USER = os.environ.get('PGUSER', 'postgres')
-PG_PASS = os.environ.get('PGPASSWORD', 'postgres')
+PG_PASS = os.environ.get('PGPASSWORD', '')
 
+SECRET_KEY = os.environ.get('SECRET_KEY', 'default-key-change-me')
 
-SECRET_KEY = os.environ.get('SECRET_KEY', 'agnks-secret-key-change-me')
 
 def get_db_connection():
     if DATABASE_URL:
