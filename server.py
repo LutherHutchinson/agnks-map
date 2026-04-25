@@ -341,6 +341,17 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Cache-Control', f'max-age={GAZPROM_CACHE_TTL}')
             self.end_headers()
             self.wfile.write(data.encode('utf-8'))
+
+        elif parsed_path.path == '/config.js':
+            # Динамически отдаем конфигурацию из переменных окружения
+            maps_key = os.environ.get('YANDEX_MAPS_API_KEY', '')
+            suggest_key = os.environ.get('YANDEX_SUGGEST_API_KEY', '')
+            config_content = f"const CONFIG = {{ YANDEX_MAPS_API_KEY: '{maps_key}', YANDEX_SUGGEST_API_KEY: '{suggest_key}' }};"
+            self.send_response(200)
+            self.send_header('Content-type', 'application/javascript')
+            self.end_headers()
+            self.wfile.write(config_content.encode('utf-8'))
+
             
         elif parsed_path.path == '/api/comments':
             query = parse_qs(parsed_path.query)
