@@ -52,29 +52,45 @@ let selectedWaypoints = [];
 
 // Пользовательские отзывы
 let userComments = {};
-let supabaseClient = null;
 let currentUser = null;
-let authMode = 'login'; // 'login', 'register', 'reset-password', or 'update-password'
-
-// Избранное
+let authMode = 'login'; // 'login', 'register'
 let favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
 
-// Функция сохранения избранного
 function saveFavorites() {
     localStorage.setItem('favStations', JSON.stringify(favoriteStations));
-    filterAndRenderStations(); // Перерисовываем карту
+    if (typeof filterAndRenderStations === 'function') filterAndRenderStations();
 }
 
-// Инициализация Supabase (если указаны ключи в config.js)
-if (CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) {
-    try {
-        // Используем глобальный объект supabase из подключенного SDK
-        supabaseClient = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-        console.log('Supabase initialized');
-    } catch (e) {
-        console.error('Failed to init Supabase:', e);
+// API Helper
+const api = {
+    async call(endpoint, method = 'GET', body = null) {
+        const url = `${CONFIG.API_URL}${endpoint}`;
+        const token = localStorage.getItem('auth_token');
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const options = {
+            method,
+            headers
+        };
+        if (body) options.body = JSON.stringify(body);
+
+        const res = await fetch(url, options);
+        if (res.status === 401) {
+            localStorage.removeItem('auth_token');
+            currentUser = null;
+            updateAuthUI();
+        }
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP error ${res.status}`);
+        }
+        return res.json();
     }
-}
+};
+
 
 ymaps.ready(init);
 
@@ -97,9 +113,13 @@ async function init() {
     myMap.geoObjects.add(objectManager);
 
     // Сначала загружаем отзывы пользователей
-    await fetchComments();
+    try {
+        await fetchComments();
+    } catch (e) {
+        console.warn('Comments fetch failed:', e);
+    }
 
-    // Затем загружаем базу заправок (она использует отзывы при сборке балунов)
+    // Затем загружаем базу заправок
     await loadStations();
 
     // Подсказки при вводе адресов
@@ -109,31 +129,31 @@ async function init() {
 
     initBottomSheetResize();
     bindUIEvents();
-    initAuth();
-
-    // Подписка на реальное время + поллинг-фолбек
-    if (supabaseClient) {
-        subscribeToComments();
-        setInterval(fetchComments, 30000); // Поллинг каждые 30 секунд
+    
+    try {
+        initAuth();
+    } catch (e) {
+        console.warn('Auth init failed:', e);
     }
+
+    // Подписка на реальное время (через короткий поллинг)
+    setInterval(fetchComments, 5000);
+
 }
+
 
 // Загрузка базы станций
 async function loadStations() {
+    allFeatures = []; // Очищаем перед загрузкой
     setStatus('Загрузка базы станций…');
 
     let gazpromData = [], allData = [];
     try {
-        // Пробуем загрузить актуальные данные через прокси
-        let resGazprom = await fetch('api/gazprom_stations').catch(() => null);
-
-        // Если прокси не ответил
+        let resGazprom = await fetch('/api/gazprom_stations').catch(() => null);
         if (!resGazprom || !resGazprom.ok) {
-            console.warn('Dynamic Gazprom API failed, falling back to static file');
-            resGazprom = await fetch(`gazprom_stations.json?t=${Date.now()}`).catch(() => null);
+            resGazprom = await fetch('/gazprom_stations.json').catch(() => null);
         }
-
-        const resAll = await fetch('stations.json').catch(() => null);
+        const resAll = await fetch('/stations.json').catch(() => null);
 
         if (resGazprom && resGazprom.ok) {
             try { gazpromData = await resGazprom.json(); } catch (e) { }
@@ -147,7 +167,7 @@ async function loadStations() {
 
     const itemsGazprom = gazpromData && gazpromData.elements ? gazpromData.elements : (Array.isArray(gazpromData) ? gazpromData : []);
     const itemsAll = Array.isArray(allData) ? allData : [];
-    console.log(`[Stations] Loaded ${itemsGazprom.length} Gazprom, ${itemsAll.length} primary.`);
+    console.log(`[Stations] Raw data: Gazprom=${itemsGazprom.length}, OSM=${itemsAll.length}`);
 
     const tolerance = 0.01;
     const processedPosIds = new Set();
@@ -328,7 +348,9 @@ async function loadStations() {
             id: 'main_' + item.id,
             geometry: {
                 type: 'Point',
-                coordinates: item.geometry.coordinates
+                coordinates: (item.geometry.coordinates[0] > 100 || item.geometry.coordinates[1] < 20) 
+                    ? [item.geometry.coordinates[1], item.geometry.coordinates[0]] 
+                    : item.geometry.coordinates
             },
             properties: {
                 nameClean,
@@ -600,31 +622,27 @@ function bindUIEvents() {
 
             try {
                 if (authMode === 'login') {
-                    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                    if (error) throw error;
-                } else if (authMode === 'register') {
-                    const { error } = await supabaseClient.auth.signUp({ email, password });
-                    if (error) throw error;
-                    alert('Регистрация успешна!');
-                } else if (authMode === 'reset-password') {
-                    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-                        redirectTo: window.location.origin + window.location.pathname
-                    });
-                    if (error) throw error;
-                    successEl.innerText = 'Письмо для сброса пароля отправлено!';
-                    successEl.style.display = 'block';
-                    authForm.style.display = 'none';
-                } else if (authMode === 'update-password') {
-                    const { error } = await supabaseClient.auth.updateUser({ password });
-                    if (error) throw error;
-                    alert('Пароль успешно обновлен!');
-                    authMode = 'login';
+                    const data = await api.call('/api/auth/login', 'POST', { email, password });
+                    localStorage.setItem('auth_token', data.token);
+                    currentUser = data.user;
+                    updateAuthUI();
                     closeAuthModal();
+                    await syncLocalFavorites();
+                    await fetchFavorites();
+                    await fetchSavedRoutes();
+                    filterAndRenderStations();
+
+                } else if (authMode === 'register') {
+                    await api.call('/api/auth/register', 'POST', { email, password });
+                    alert('Регистрация успешна! Теперь вы можете войти.');
+                    authMode = 'login';
+                    updateAuthModalLabels();
                 }
             } catch (err) {
                 errorEl.innerText = translateAuthError(err.message);
                 errorEl.style.display = 'block';
             } finally {
+
                 submitBtn.disabled = false;
                 submitBtn.innerText = originalText;
             }
@@ -688,69 +706,29 @@ async function onSaveRouteSubmit(e) {
 
 // === Auth Functions ===
 async function initAuth() {
-    if (!supabaseClient) return;
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
 
-    supabaseClient.auth.onAuthStateChange(async (event, session) => {
-        currentUser = session?.user || null;
+    try {
+        const data = await api.call('/api/auth/me');
+        currentUser = data.user;
         updateAuthUI();
-
-        console.log('Auth event:', event, 'authMode:', authMode, 'isRecoveryFlow:', isRecoveryFlow);
-
-        if (event === 'SIGNED_IN') {
-            // Если мы в процессе восстановления пароля — НЕ закрываем окно!
-            if (authMode === 'update-password' || isRecoveryFlow) {
-                authMode = 'update-password';
-                updateAuthModalLabels();
-            } else {
-                closeAuthModal();
-            }
-            // Синхронизируем избранное при входе
-            await syncLocalFavorites();
-            await fetchFavorites();
-        } else if (event === 'SIGNED_OUT') {
-            favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
-            filterAndRenderStations();
-        } else if (event === 'PASSWORD_RECOVERY') {
-            openAuthModal('update-password');
-        }
-    });
-
-    // Если в URL были признаки восстановления — принудительно открываем форму
-    if (isRecoveryFlow) {
-        console.log('Forcing open update-password modal');
-        openAuthModal('update-password');
-    }
-
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    currentUser = session?.user || null;
-    updateAuthUI();
-
-    if (supabaseClient) {
-        await fetchComments();
-        subscribeToComments(); // Подписка на новые отзывы
-    }
-
-    if (currentUser) {
         await fetchFavorites();
-        await fetchSavedRoutes(); // Добавлено
+        await fetchSavedRoutes();
+    } catch (err) {
+        console.warn('Auth check failed:', err);
+        localStorage.removeItem('auth_token');
     }
+
+    await fetchComments();
 }
 
 async function fetchFavorites() {
-    if (!supabaseClient || !currentUser) return;
+    if (!currentUser) return;
     try {
-        const { data, error } = await supabaseClient
-            .from('favorites')
-            .select('station_id')
-            .eq('user_id', currentUser.id);
-
-        if (error) throw error;
-
-        // Объединяем с локальными или заменяем? Обычно лучше объединить
-        const remoteIds = data.map(item => item.station_id);
+        const data = await api.call('/api/favorites');
+        const remoteIds = data;
         const localIds = JSON.parse(localStorage.getItem('favStations') || '[]');
-
-        // Уникальный набор
         const combined = new Set([...localIds, ...remoteIds]);
         favoriteStations = Array.from(combined);
         saveFavorites();
@@ -760,50 +738,37 @@ async function fetchFavorites() {
 }
 
 async function syncLocalFavorites() {
-    if (!supabaseClient || !currentUser) return;
+    if (!currentUser) return;
     const localIds = JSON.parse(localStorage.getItem('favStations') || '[]');
     if (localIds.length === 0) return;
 
     try {
-        const toInsert = localIds.map(id => ({
-            user_id: currentUser.id,
-            station_id: id
-        }));
-
-        // Используем upsert чтобы избежать ошибок дубликатов
-        const { error } = await supabaseClient
-            .from('favorites')
-            .upsert(toInsert, { onConflict: 'user_id,station_id' });
-
-        if (error) throw error;
+        for (const id of localIds) {
+            await api.call('/api/favorites', 'POST', { station_id: id, action: 'add' });
+        }
     } catch (err) {
         console.error('Error syncing local favorites:', err);
     }
 }
 
-async function syncFavoriteToSupabase(stId) {
-    if (!supabaseClient || !currentUser) return;
+async function syncFavoriteToBackend(stId) {
+    if (!currentUser) return;
     try {
-        await supabaseClient
-            .from('favorites')
-            .upsert({ user_id: currentUser.id, station_id: stId }, { onConflict: 'user_id,station_id' });
+        await api.call('/api/favorites', 'POST', { station_id: stId, action: 'add' });
     } catch (err) {
-        console.error('Error adding favorite to Supabase:', err);
+        console.error('Error adding favorite to backend:', err);
     }
 }
 
-async function removeFavoriteFromSupabase(stId) {
-    if (!supabaseClient || !currentUser) return;
+async function removeFavoriteFromBackend(stId) {
+    if (!currentUser) return;
     try {
-        await supabaseClient
-            .from('favorites')
-            .delete()
-            .eq('user_id', currentUser.id)
-            .eq('station_id', stId);
+        await api.call('/api/favorites', 'POST', { station_id: stId, action: 'remove' });
     } catch (err) {
-        console.error('Error removing favorite from Supabase:', err);
+        console.error('Error removing favorite from backend:', err);
     }
 }
+
 
 function updateAuthUI() {
     const authBtn = document.getElementById('auth-btn');
@@ -823,7 +788,13 @@ function updateAuthUI() {
     if (myRoutesBtn) {
         myRoutesBtn.style.display = currentUser ? 'flex' : 'none';
     }
+
+    const adminBtn = document.getElementById('admin-btn');
+    if (adminBtn) {
+        adminBtn.style.display = (currentUser && currentUser.is_admin) ? 'flex' : 'none';
+    }
 }
+
 
 function openAuthModal(mode = 'login') {
     authMode = mode;
@@ -842,16 +813,29 @@ function closeAuthModal() {
 function translateAuthError(msg) {
     if (!msg) return 'Неизвестная ошибка';
     const lower = msg.toLowerCase();
-    if (lower.includes('invalid login credentials')) return 'Неверный email или пароль';
-    if (lower.includes('user already registered')) return 'Пользователь с таким email уже зарегистрирован.';
-    if (lower.includes('password should be at least 6 characters')) return 'Пароль должен быть не менее 6 символов.';
-    if (lower.includes('signup disabled')) return 'Регистрация временно отключена.';
-    if (lower.includes('email link is invalid or has expired')) return 'Ссылка недействительна или срок её действия истек.';
-    if (lower.includes('rate limit exceeded')) return 'Слишком много попыток. Пожалуйста, подождите немного (обычно 1 час).';
-    if (lower.includes('network error') || lower.includes('failed to fetch')) return 'Ошибка сети. Проверьте соединение с интернетом.';
+    
+    if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
+        return 'Неверный email или пароль';
+    }
+    if (lower.includes('user already registered') || lower.includes('user already exists')) {
+        return 'Пользователь с таким email уже зарегистрирован.';
+    }
+    if (lower.includes('password should be at least 6 characters')) {
+        return 'Пароль должен быть не менее 6 символов.';
+    }
+    if (lower.includes('missing email or password')) {
+        return 'Введите email и пароль.';
+    }
+    if (lower.includes('network error') || lower.includes('failed to fetch')) {
+        return 'Ошибка сети. Проверьте соединение с интернетом.';
+    }
+    if (lower.includes('unauthorized')) {
+        return 'Сессия истекла. Пожалуйста, войдите снова.';
+    }
 
     return msg;
 }
+
 
 function toggleAuthMode() {
     authMode = (authMode === 'login' ? 'register' : 'login');
@@ -910,10 +894,13 @@ function updateAuthModalLabels() {
 }
 
 async function logout() {
-    if (supabaseClient) {
-        await supabaseClient.auth.signOut();
-    }
+    localStorage.removeItem('auth_token');
+    currentUser = null;
+    favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
+    updateAuthUI();
+    filterAndRenderStations();
 }
+
 
 // Возвращает список выбранных фильтров по удобствам
 function getSelectedAmenities() {
@@ -1125,8 +1112,10 @@ async function planFuelRoute() {
             console.warn(`Insufficient infrastructure at ${lastStopDist.toFixed(1)} km. Gap exceeds budget ${budget.toFixed(1)} km.`);
             alert(`ВНИМАНИЕ: Маршрут не рекомендуется. Между станциями слишком большой разрыв в районе ${(lastStopDist + budget).toFixed(0)} км.`);
             setStatus('Маршрут не рекомендуется (разрыв)');
+            stopsToAdd.length = 0; // Очищаем список заправок, если маршрут не рекомендуется
             break;
         }
+
 
         // Добавляем остановку
         stopsToAdd.push({
@@ -1187,8 +1176,10 @@ function resetRoute() {
     document.getElementById('reset-route').style.display = 'none';
     document.getElementById('save-route-btn').style.display = 'none'; // Скрываем и эту кнопку
 
+    objectManager.objects.balloon.close();
     updateRouteSidebar();
     filterAndRenderStations();
+
 }
 
 // Построение маршрута
@@ -2044,7 +2035,8 @@ async function loadGuide() {
             lines.forEach(line => {
                 const li = document.createElement('li');
                 li.innerHTML = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                guideList.appendChild(li);
+                listEl.appendChild(li);
+
             });
         }
     } catch (err) {
@@ -2055,74 +2047,38 @@ async function loadGuide() {
 // --- РАБОТА С ОТЗЫВАМИ ---
 
 async function fetchComments() {
-    if (!supabaseClient) return;
-
     try {
-        let allData = [];
-        let from = 0;
-        let to = 999;
-        let finished = false;
-
-        console.log('[Supabase] Start multi-page fetch...');
-
-        while (!finished) {
-            const { data, error } = await supabaseClient
-                .from('comments')
-                .select('id, station_id, text, date, author_email')
-                .order('created_at', { ascending: false })
-                .range(from, to);
-
-            if (error) {
-                console.error('Supabase fetch error:', error);
-                break;
-            }
-
-            if (data && data.length > 0) {
-                allData = allData.concat(data);
-                if (data.length < 1000) {
-                    finished = true;
-                } else {
-                    from += 1000;
-                    to += 1000;
-                }
-            } else {
-                finished = true;
-            }
-            
-            // Защита от бесконечного цикла
-            if (from > 10000) break; 
-        }
-
-        if (allData.length > 0) {
+        const data = await api.call('/api/comments');
+        if (data && data.length > 0) {
             userComments = {};
-            allData.forEach(c => {
+            data.forEach(c => {
                 if (!userComments[c.station_id]) userComments[c.station_id] = [];
                 userComments[c.station_id].push({
+                    id: c.id,
                     text: c.text,
                     date: c.date,
                     author_email: c.author_email
                 });
             });
-            window.totalCommentsLoaded = allData.length;
-            console.log(`[Supabase] Total loaded: ${allData.length} comments.`);
+            const countChanged = (window.totalCommentsLoaded !== data.length);
+            window.totalCommentsLoaded = data.length;
 
-            // После загрузки обновляем открытые и закрытые баллоны
             const openCommentsLists = document.querySelectorAll('div[id^="comments-list-"]');
             openCommentsLists.forEach(list => {
                 const stId = list.id.replace('comments-list-', '');
-                console.log(`Polling: refreshing open balloon for station ${stId}`);
                 list.innerHTML = buildCommentsHtml(stId);
             });
 
-            // Принудительно обновляем все баллоны на карте, чтобы в них появились отзывы
-            filterAndRenderStations();
-        } else if (error) {
-            console.warn('Supabase fetch error:', error);
+            if (countChanged) {
+                filterAndRenderStations();
+            }
         }
+
     } catch (e) {
-        console.error('Supabase exception:', e);
+        console.error('Comments fetch error:', e);
     }
 }
+
 
 function buildCommentsHtml(stationId) {
     const comments = userComments[stationId] || [];
@@ -2153,17 +2109,6 @@ async function onCommentSubmit(stationId) {
     const text = input.value.trim();
     if (!text) return;
 
-    if (!supabaseClient) {
-        let missing = [];
-        if (typeof CONFIG === 'undefined') missing.push('CONFIG undefined');
-        else {
-            if (!CONFIG.SUPABASE_URL) missing.push('SUPABASE_URL');
-            if (!CONFIG.SUPABASE_ANON_KEY) missing.push('SUPABASE_ANON_KEY');
-        }
-        alert('Система отзывов не настроена: ' + (missing.length ? 'отсутствуют [' + missing.join(', ') + ']' : 'причина неизвестна'));
-        return;
-    }
-
     const now = new Date();
     const dateStr = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
@@ -2172,39 +2117,23 @@ async function onCommentSubmit(stationId) {
             station_id: String(stationId),
             text,
             date: dateStr,
-            user_id: currentUser?.id || null,
             author_email: currentUser?.email || null
         };
 
-        const { error } = await supabaseClient
-            .from('comments')
-            .insert([newComment]);
+        await api.call('/api/comments', 'POST', newComment);
 
-        if (!error) {
-            input.value = '';
-            // Локально обновляем данные для мгновенного отображения
-            if (!userComments[stationId]) userComments[stationId] = [];
-            userComments[stationId].push({
-                text,
-                date: dateStr,
-                author_email: currentUser?.email || null
-            });
+        input.value = '';
+        if (!userComments[stationId]) userComments[stationId] = [];
+        userComments[stationId].unshift(newComment);
 
-            // Перерисовываем весь балун, чтобы обновить состояние (новости, флаги и т.д.)
-            objectManager.objects.balloon.setData(objectManager.objects.getById(stationId));
-
-            // Скрываем форму обратно
-            toggleCommentForm(stationId);
-            console.log('Comment saved to Supabase');
-        } else {
-            console.error('Supabase insert error:', error);
-            alert('Не удалось отправить отзыв. Проверьте настройки базы данных.');
-        }
+        objectManager.objects.balloon.setData(objectManager.objects.getById(stationId));
+        toggleCommentForm(stationId);
     } catch (e) {
-        console.error('Supabase insert exception:', e);
-        alert('Ошибка сети при отправке отзыва.');
+        console.error('Comment submit error:', e);
+        alert('Ошибка при отправке отзыва.');
     }
 }
+
 
 function toggleCommentForm(stationId) {
     const formWrap = document.getElementById(`comment-form-wrap-${stationId}`);
@@ -2226,28 +2155,19 @@ function toggleCommentForm(stationId) {
 let savedRoutes = [];
 
 async function fetchSavedRoutes() {
-    if (!supabaseClient || !currentUser) return;
+    if (!currentUser) return;
     try {
-        const { data, error } = await supabaseClient
-            .from('saved_routes')
-            .select('*')
-            .order('created_at', { ascending: false });
-
-        if (!error && data) {
-            savedRoutes = data;
-            renderSavedRoutes();
-            console.log('Saved routes loaded:', savedRoutes.length);
-        } else if (error) {
-            console.warn('Error fetching routes:', error);
-        }
+        const data = await api.call('/api/saved_routes');
+        savedRoutes = data;
+        renderSavedRoutes();
     } catch (e) {
-        console.error('Saved routes exception:', e);
+        console.error('Saved routes error:', e);
     }
 }
 
 async function saveCurrentRoute(name) {
-    if (!supabaseClient || !currentUser) {
-        alert('Войдите, чтобы сохранять маршруты');
+    if (!currentUser) {
+        openAuthModal('login');
         return;
     }
 
@@ -2256,16 +2176,8 @@ async function saveCurrentRoute(name) {
         return;
     }
 
-    // Проверка корректности координат (Yandex возвращает [lat, lon])
-    if (isNaN(originGeo[0]) || isNaN(originGeo[1]) || isNaN(destGeo[0]) || isNaN(destGeo[1])) {
-        alert('Ошибка в координатах маршрута. Попробуйте еще раз.');
-        console.error('Invalid coords for saving:', { originGeo, destGeo });
-        return;
-    }
-
     try {
         const newRoute = {
-            user_id: currentUser.id,
             name: name || `Маршрут от ${new Date().toLocaleDateString()}`,
             origin_name: originName || 'Точка А',
             dest_name: destName || 'Точка Б',
@@ -2274,48 +2186,27 @@ async function saveCurrentRoute(name) {
             waypoints: selectedWaypoints || []
         };
 
-        console.log('Saving route to Supabase...', newRoute);
-
-        const { data, error } = await supabaseClient
-            .from('saved_routes')
-            .insert([newRoute])
-            .select();
-
-        if (!error && data) {
-            savedRoutes.unshift(data[0]);
-            renderSavedRoutes();
-            closeSaveRouteModal();
-            console.log('Route saved successfully:', data[0]);
-        } else {
-            console.error('Supabase error saving route:', error);
-            alert(`Ошибка при сохранении: ${error?.message || 'Неизвестная ошибка'}`);
-        }
+        const data = await api.call('/api/saved_routes', 'POST', newRoute);
+        savedRoutes.unshift(data);
+        renderSavedRoutes();
+        closeSaveRouteModal();
     } catch (e) {
-        console.error('Save route exception:', e);
-        alert('Внутренняя ошибка при сохранении');
+        console.error('Save route error:', e);
+        alert('Ошибка при сохранении маршрута');
     }
 }
 
 async function deleteSavedRoute(id) {
     if (!confirm('Удалить этот маршрут?')) return;
-
     try {
-        const { error } = await supabaseClient
-            .from('saved_routes')
-            .delete()
-            .eq('id', id);
-
-        if (!error) {
-            savedRoutes = savedRoutes.filter(r => r.id !== id);
-            renderSavedRoutes();
-            console.log('Route deleted');
-        } else {
-            console.error('Error deleting route:', error);
-        }
+        await api.call(`/api/saved_routes/${id}`, 'DELETE');
+        savedRoutes = savedRoutes.filter(r => r.id !== id);
+        renderSavedRoutes();
     } catch (e) {
-        console.error('Delete route exception:', e);
+        console.error('Delete route error:', e);
     }
 }
+
 
 function renderSavedRoutes() {
     const listEl = document.getElementById('routes-list');
@@ -2369,7 +2260,9 @@ window.loadSavedRoute = function (id) {
 
     closeRoutesModal();
     requestRouteAndRedraw();
+    document.getElementById('reset-route').style.display = 'block';
 };
+
 
 function openRoutesModal() {
     document.getElementById('routes-modal').style.display = 'flex';
@@ -2626,16 +2519,14 @@ async function toggleFavorite(stId) {
 
     saveFavorites();
 
-    // Синхронизация с облаком
     if (currentUser) {
         if (isAdding) {
-            await syncFavoriteToSupabase(stId);
+            await syncFavoriteToBackend(stId);
         } else {
-            await removeFavoriteFromSupabase(stId);
+            await removeFavoriteFromBackend(stId);
         }
     }
 
-    // Находим все открытые балуны и обновляем текст кнопки, если нужно
     const btn = document.querySelector('.fav-btn-balloon');
     if (btn) {
         const isFav = favoriteStations.includes(stId);
@@ -2643,6 +2534,7 @@ async function toggleFavorite(stId) {
         btn.innerHTML = isFav ? '⭐' : '☆';
     }
 }
+
 
 function goToStation(stId) {
     // Находим объект
@@ -2734,11 +2626,6 @@ function closeReportModal() {
 async function submitErrorReport(e) {
     e.preventDefault();
 
-    if (!supabaseClient) {
-        alert('Система отправки ошибок не настроена.');
-        return;
-    }
-
     const submitBtn = document.getElementById('report-submit-btn');
     const errorEl = document.getElementById('report-error');
     const successEl = document.getElementById('report-success');
@@ -2759,17 +2646,12 @@ async function submitErrorReport(e) {
     errorEl.style.display = 'none';
 
     try {
-        const { error } = await supabaseClient
-            .from('error_reports')
-            .insert([{
-                station_id: stationId || null,
-                error_type: errorType,
-                description: description,
-                author_email: email,
-                user_id: currentUser?.id || null
-            }]);
-
-        if (error) throw error;
+        await api.call('/api/error_reports', 'POST', {
+            station_id: stationId || null,
+            error_type: errorType,
+            description: description,
+            author_email: email
+        });
 
         successEl.innerText = 'Спасибо! Информация отправлена на модерацию.';
         successEl.style.display = 'block';
@@ -2777,7 +2659,6 @@ async function submitErrorReport(e) {
 
         setTimeout(() => {
             closeReportModal();
-            // Сбрасываем видимость формы для следующего раза
             document.getElementById('report-form').style.display = 'block';
         }, 3000);
 
@@ -2791,48 +2672,180 @@ async function submitErrorReport(e) {
     }
 }
 
+
 // Вызываем фильтрацию при загрузке
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(filterAndRenderStations, 1000); // Даем время на загрузку данных
 });
 
-// Подписка на новые комментарии в реальном времени
+// Подписка на новые комментарии (заменена на поллинг в init)
 function subscribeToComments() {
-    if (!supabaseClient) return;
-
-    console.log('Subscribing to real-time comments...');
-
-    supabaseClient
-        .channel('public:comments')
-        .on('postgres_changes', {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'comments'
-        }, payload => {
-            console.log('New comment received via Realtime:', payload.new);
-            const newComment = payload.new;
-            const stId = newComment.station_id;
-
-            // Обновляем локальный кэш
-            if (!userComments[stId]) userComments[stId] = [];
-
-            // Проверяем, нет ли уже такого комментария (чтобы не дублировать для автора)
-            const exists = userComments[stId].some(c => c.id === newComment.id);
-            if (!exists) {
-                userComments[stId].push({
-                    id: newComment.id,
-                    text: newComment.text,
-                    date: newComment.date,
-                    author: newComment.author_email || 'Аноним'
-                });
-
-                // Обновляем UI, если открыт балун именно этой заправки
-                const list = document.getElementById(`comments-list-${stId}`);
-                if (list) {
-                    console.log(`Updating comments list for station ${stId}`);
-                    list.innerHTML = buildCommentsHtml(stId);
-                }
-            }
-        })
-        .subscribe();
+    console.log('Real-time subscription removed, using polling instead.');
 }
+
+
+// === ADMIN PANEL LOGIC ===
+function initAdmin() {
+    const adminBtn = document.getElementById('admin-btn');
+    const adminModal = document.getElementById('admin-modal');
+    const closeAdmin = document.getElementById('close-admin');
+    const tabBtns = document.querySelectorAll('.admin-tab-btn');
+
+    if (adminBtn) {
+        adminBtn.addEventListener('click', () => {
+            adminModal.style.display = 'flex';
+            loadAdminReports();
+            loadAdminComments();
+            loadAdminUsers();
+        });
+
+    }
+
+    if (closeAdmin) {
+        closeAdmin.addEventListener('click', () => {
+            adminModal.style.display = 'none';
+        });
+    }
+
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            tabBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const target = btn.dataset.tab;
+            document.querySelectorAll('.admin-tab-content').forEach(c => {
+                c.style.display = (c.id === target) ? 'block' : 'none';
+            });
+        });
+    });
+}
+
+function getStationName(id) {
+    if (!id) return '-';
+    const feature = allFeatures.find(f => String(f.id) === String(id));
+    return feature ? feature.properties.nameClean : `ID: ${id}`;
+}
+
+async function loadAdminReports() {
+    try {
+        const reports = await api.call('/api/admin/error_reports');
+        const list = document.getElementById('admin-reports-list');
+        list.innerHTML = reports.map(r => `
+            <tr class="report-status-${r.status}">
+                <td>${new Date(r.created_at).toLocaleString()}</td>
+                <td>${getStationName(r.station_id)}</td>
+                <td>${r.error_type}</td>
+                <td>${r.description || ''}</td>
+                <td>${r.author_email || ''}</td>
+                <td>
+                    <div class="admin-actions-cell">
+                        <select onchange="updateAdminReportStatus('${r.id}', this.value)">
+                            <option value="pending" ${r.status === 'pending' ? 'selected' : ''}>Ожидает</option>
+                            <option value="fixed" ${r.status === 'fixed' ? 'selected' : ''}>Исправлено</option>
+                            <option value="rejected" ${r.status === 'rejected' ? 'selected' : ''}>Отклонено</option>
+                        </select>
+                        <button class="admin-btn-delete" onclick="deleteAdminReport('${r.id}')">X</button>
+                    </div>
+                </td>
+
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error('Admin reports load fail:', err);
+    }
+}
+
+
+
+async function loadAdminComments() {
+    try {
+        const comments = await api.call('/api/admin/comments');
+        const list = document.getElementById('admin-comments-list');
+        list.innerHTML = comments.map(c => `
+            <tr>
+                <td>${c.date}</td>
+                <td>${getStationName(c.station_id)}</td>
+
+                <td>${c.text}</td>
+                <td>${c.author_email}</td>
+                <td><button class="admin-btn-delete" onclick="deleteAdminComment('${c.id}')">Удалить</button></td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error('Admin comments load fail:', err);
+    }
+}
+
+async function loadAdminUsers() {
+    try {
+        const users = await api.call('/api/admin/users');
+        const list = document.getElementById('admin-users-list');
+        list.innerHTML = users.map(u => `
+            <tr>
+                <td>${u.email}</td>
+                <td>
+                    <input type="checkbox" ${u.is_admin ? 'checked' : ''} 
+                           onchange="toggleAdminStatus('${u.id}')">
+                </td>
+                <td>${new Date(u.created_at).toLocaleDateString()}</td>
+                <td>
+                    <button class="admin-btn-delete" onclick="deleteAdminUser('${u.id}')">Удалить</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error('Admin users load fail:', err);
+    }
+}
+
+window.updateAdminReportStatus = async function(id, status) {
+    try {
+        await api.call(`/api/admin/error_reports/status/${id}`, 'POST', { status });
+        loadAdminReports();
+    } catch (err) {
+        alert('Ошибка обновления статуса: ' + err.message);
+    }
+};
+
+window.toggleAdminStatus = async function(id) {
+    try {
+        await api.call(`/api/admin/users/toggle_admin/${id}`, 'POST');
+        loadAdminUsers();
+    } catch (err) {
+        alert('Ошибка изменения прав: ' + err.message);
+    }
+};
+
+window.deleteAdminUser = async function(id) {
+    if (!confirm('Удалить этого пользователя?')) return;
+    try {
+        await api.call(`/api/admin/users/${id}`, 'DELETE');
+        loadAdminUsers();
+    } catch (err) {
+        alert('Ошибка при удалении: ' + err.message);
+    }
+};
+
+window.deleteAdminReport = async function(id) {
+
+    if (!confirm('Удалить этот отчет?')) return;
+    try {
+        await api.call(`/api/admin/error_reports/${id}`, 'DELETE');
+        loadAdminReports();
+    } catch (err) {
+        alert('Ошибка при удалении: ' + err.message);
+    }
+};
+
+window.deleteAdminComment = async function(id) {
+    if (!confirm('Удалить этот отзыв?')) return;
+    try {
+        await api.call(`/api/admin/comments/${id}`, 'DELETE');
+        loadAdminComments();
+        fetchComments(); // Обновляем кэш отзывов
+    } catch (err) {
+        alert('Ошибка при удалении: ' + err.message);
+    }
+};
+
+// Вызов инициализации в конце bindUIEvents или init
+initAdmin();

@@ -8,26 +8,26 @@
     --color-go-btn-dark: #1b5e20;
     --color-danger: #d32f2f;
     --color-danger-dark: #b71c1c;
-    --color-text-main: #333;
-    --color-text-muted: #555;
-    --color-text-faint: #666;
-    --color-text-label: #444;
-    --color-border: #ccc;
-    --color-border-light: #eee;
-    --color-stop-bg: #fff8e1;
-    --color-panel-bg: rgba(255, 255, 255, 0.95);
+    --color-text-main: #1a1a1a;
+    --color-text-muted: #4a4a4a;
+    --color-text-faint: #757575;
+    --color-text-label: #2c2c2c;
+    --color-border: #e0e0e0;
+    --color-border-light: #f0f0f0;
+    --color-stop-bg: #fffbf0;
+    --color-panel-bg: rgba(255, 255, 255, 0.85);
 
     /* Размеры */
-    --panel-width: 320px;
-    --border-radius-sm: 4px;
-    --border-radius-md: 6px;
-    --border-radius-lg: 12px;
+    --panel-width: 340px;
+    --border-radius-sm: 8px;
+    --border-radius-md: 12px;
+    --border-radius-lg: 20px;
 
     /* Тени */
-    --shadow-panel: 0 4px 15px rgba(0, 0, 0, 0.15);
-    --shadow-stop: 0 1px 3px rgba(0, 0, 0, 0.1);
-    --shadow-btn: 0 2px 5px rgba(0, 0, 0, 0.2);
-    --shadow-balloon-btn: 0 2px 4px rgba(0, 0, 0, 0.1);
+    --shadow-panel: 0 10px 40px rgba(0, 0, 0, 0.12);
+    --shadow-stop: 0 2px 8px rgba(0, 0, 0, 0.06);
+    --shadow-btn: 0 4px 12px rgba(0, 0, 0, 0.15);
+    --shadow-balloon-btn: 0 4px 10px rgba(0, 0, 0, 0.08);
 }
 
 /* Базовые стили */
@@ -62,18 +62,22 @@ h3 {
 /* Боковая панель управления */
 #controls {
     position: absolute;
-    top: 15px;
-    left: 15px;
+    top: 20px;
+    left: 20px;
     z-index: 100;
     width: var(--panel-width);
-    max-height: 90vh;
-    padding: 20px;
+    max-height: calc(100vh - 40px);
+    padding: 24px;
     overflow-y: auto;
 
     background: var(--color-panel-bg);
     border-radius: var(--border-radius-lg);
     box-shadow: var(--shadow-panel);
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Строка статуса под кнопкой */
@@ -139,13 +143,24 @@ h3 {
 }
 
 input[type="text"],
+input[type="number"],
 button {
     width: 100%;
-    padding: 10px;
-    margin-bottom: 12px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius-md);
     font-size: 14px;
+    background: #fff;
+    color: var(--color-text-main);
+    transition: all 0.2s ease;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.2);
 }
 
 .search-divider {
@@ -241,12 +256,19 @@ button {
     border: none;
     cursor: pointer;
     font-weight: 600;
-    color: var(--color-text-main);
-    transition: background 0.2s;
+    color: #000;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s ease;
 }
 
 button:hover {
     background-color: var(--color-accent-dark);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+button:active {
+    transform: translateY(0);
 }
 
 input[type="range"] {
@@ -1785,4 +1807,125 @@ input[type="range"] {
 .remove-via-btn:hover {
     background-color: var(--color-danger);
     color: white;
+}
+/* Admin Panel Styles */
+.admin-modal-content {
+    max-width: 900px;
+    background: rgba(255, 255, 255, 0.9) !important;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.admin-tabs {
+    display: flex;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--color-border-light);
+    gap: 10px;
+}
+
+.admin-tab-btn {
+    padding: 12px 24px;
+    background: none !important; /* Убираем желтый фон */
+    border: none !important;
+    border-bottom: 3px solid transparent !important;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--color-text-faint);
+    transition: all 0.2s;
+    width: auto !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+}
+
+.admin-tab-btn:hover {
+    color: var(--color-text-main);
+    background: rgba(0, 0, 0, 0.05) !important;
+}
+
+.admin-tab-btn.active {
+    color: var(--color-accent-dark) !important;
+    border-bottom-color: var(--color-accent-dark) !important;
+    background: none !important;
+}
+
+
+.admin-table-wrapper {
+    overflow-x: auto;
+    width: 100%;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.admin-table th, .admin-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.admin-table th {
+    background: #f9f9f9;
+    font-weight: bold;
+    color: var(--color-text-main);
+}
+
+.admin-btn-delete {
+    background: var(--color-danger) !important;
+    color: white !important;
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+    border-radius: 4px !important;
+    width: auto !important;
+    margin: 0 !important;
+}
+
+.admin-btn-delete:hover {
+    background: var(--color-danger-dark) !important;
+}
+
+/* Admin Status Select Styling */
+.admin-table select {
+    padding: 6px 10px;
+    border: 1.5px solid var(--color-border);
+    border-radius: var(--border-radius-sm);
+    font-size: 12px;
+    font-family: inherit;
+    background-color: white;
+    cursor: pointer;
+    transition: all 0.2s;
+    outline: none;
+}
+
+.admin-table select:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px rgba(255, 204, 0, 0.2);
+}
+
+/* Status colors in the table rows */
+.report-status-pending {
+    background-color: rgba(255, 204, 0, 0.05);
+}
+
+.report-status-fixed {
+    background-color: rgba(46, 125, 50, 0.05);
+}
+
+.report-status-rejected {
+    background-color: rgba(211, 47, 47, 0.05);
+}
+
+.admin-table select option {
+    background: white;
+    color: var(--color-text-main);
+}
+
+.admin-actions-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
 }
