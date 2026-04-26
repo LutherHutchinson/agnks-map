@@ -391,7 +391,23 @@ async function loadStations() {
     }
 }
 
+
+/** Проверка, находится ли объект геокодирования в России */
+function isInsideRussia(geoObj) {
+    if (!geoObj) return false;
+    const meta = geoObj.properties.get('metaDataProperty.GeocoderMetaData');
+    if (!meta || !meta.Address) return false;
+
+    // Код страны RU — самый надежный признак
+    if (meta.Address.CountryCode === 'RU') return true;
+
+    // На всякий случай проверяем компоненты адреса
+    const components = meta.Address.Components || [];
+    return components.some(c => c.kind === 'country' && (c.name === 'Россия' || c.name === 'Russian Federation'));
+}
+
 function bindUIEvents() {
+
     const showAllCheckbox = document.getElementById('show-all');
     const distanceSlider = document.getElementById('distance-slider');
     const distanceValLabel = document.getElementById('distance-val');
@@ -960,6 +976,11 @@ async function onCitySearchClick() {
         const res = await ymaps.geocode(query, { results: 1 });
         const obj = res.geoObjects.get(0);
         if (obj) {
+            if (!isInsideRussia(obj)) {
+                setStatus('Мы работаем только в РФ');
+                alert('Мы работаем только в РФ');
+                return;
+            }
             const coords = obj.geometry.getCoordinates();
             myMap.setCenter(coords, 10);
             setStatus(`Карта центрирована на: ${query}`);
@@ -991,6 +1012,16 @@ function onBuildRoute(fromInput, toInput, viaInputs = []) {
         if (!fromGeoObj || !toGeoObj) {
             setStatus('Город не найден. Проверьте написание.');
             return;
+        }
+
+        // Проверка всех точек маршрута на нахождение в РФ
+        for (let i = 0; i < results.length; i++) {
+            const obj = results[i].geoObjects.get(0);
+            if (obj && !isInsideRussia(obj)) {
+                setStatus('Мы работаем только в РФ');
+                alert('Мы работаем только в РФ');
+                return;
+            }
         }
 
         originGeo = fromGeoObj.geometry.getCoordinates(); // [lat, lon]
@@ -2014,6 +2045,11 @@ function useMyLocation(inputId) {
 
             ymaps.geocode([lat, lon]).then(function (res) {
                 const firstGeoObject = res.geoObjects.get(0);
+                if (firstGeoObject && !isInsideRussia(firstGeoObject)) {
+                    setStatus('Мы работаем только в РФ');
+                    alert('Мы работаем только в РФ');
+                    return;
+                }
                 const address = firstGeoObject ? firstGeoObject.getAddressLine() : `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
                 document.getElementById(inputId).value = address;
                 setStatus('Местоположение определено');
