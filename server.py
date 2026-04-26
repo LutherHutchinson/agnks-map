@@ -423,7 +423,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 conn = get_db_connection()
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute('SELECT id, email, is_admin, created_at FROM users ORDER BY created_at DESC')
+                cursor.execute('SELECT id, email, is_admin, created_at FROM users ORDER BY created_at DESC, id DESC')
                 users = cursor.fetchall()
                 cursor.close()
                 conn.close()
@@ -439,7 +439,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 conn = get_db_connection()
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute('SELECT * FROM error_reports ORDER BY created_at DESC')
+                cursor.execute('SELECT * FROM error_reports ORDER BY created_at DESC, id DESC')
                 reports = cursor.fetchall()
                 cursor.close()
                 conn.close()

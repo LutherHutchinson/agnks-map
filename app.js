@@ -2763,6 +2763,9 @@ function getStationName(id) {
 async function loadAdminReports() {
     try {
         const reports = await api.call('/api/admin/error_reports');
+        // Сортировка на клиенте (от новых к старым)
+        reports.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        
         const list = document.getElementById('admin-reports-list');
         list.innerHTML = reports.map(r => `
             <tr class="report-status-${r.status}">
@@ -2794,6 +2797,19 @@ async function loadAdminReports() {
 async function loadAdminComments() {
     try {
         const comments = await api.call('/api/admin/comments');
+        
+        // Сортировка на клиенте (от новых к старым)
+        const parseDate = (s) => {
+            if (!s) return 0;
+            const parts = s.split(/[\s,]+/);
+            if (parts.length < 2) return 0;
+            const [d, t] = parts;
+            const [day, month, year] = d.split('.');
+            const [hour, min] = t.split(':');
+            return new Date(year, month - 1, day, hour, min).getTime();
+        };
+        comments.sort((a, b) => parseDate(b.date) - parseDate(a.date));
+
         const list = document.getElementById('admin-comments-list');
         list.innerHTML = comments.map(c => `
             <tr>
@@ -2813,6 +2829,9 @@ async function loadAdminComments() {
 async function loadAdminUsers() {
     try {
         const users = await api.call('/api/admin/users');
+        // Сортировка на клиенте (от новых к старым)
+        users.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        
         const list = document.getElementById('admin-users-list');
         list.innerHTML = users.map(u => `
             <tr>
