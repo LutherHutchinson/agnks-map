@@ -2069,6 +2069,23 @@ async function fetchComments() {
         const data = await api.call('/api/comments');
         if (data && data.length > 0) {
             userComments = {};
+            
+            // Сортируем на клиенте для надежности (от новых к старым)
+            data.sort((a, b) => {
+                // Если есть created_at, лучше по нему, но в data его может не быть.
+                // Поэтому парсим строку date "ДД.ММ.ГГГГ ЧЧ:ММ"
+                const parseDate = (s) => {
+                    if (!s) return 0;
+                    const parts = s.split(/[\s,]+/);
+                    if (parts.length < 2) return 0;
+                    const [d, t] = parts;
+                    const [day, month, year] = d.split('.');
+                    const [hour, min] = t.split(':');
+                    return new Date(year, month - 1, day, hour, min).getTime();
+                };
+                return parseDate(b.date) - parseDate(a.date);
+            });
+
             data.forEach(c => {
                 if (!userComments[c.station_id]) userComments[c.station_id] = [];
                 userComments[c.station_id].push({

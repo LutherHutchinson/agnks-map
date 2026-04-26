@@ -363,9 +363,9 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 conn = get_db_connection()
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
                 if station_id:
-                    cursor.execute('SELECT id, station_id, text, date, author_email FROM comments WHERE station_id = %s ORDER BY created_at DESC', (station_id,))
+                    cursor.execute('SELECT id, station_id, text, date, author_email FROM comments WHERE station_id = %s ORDER BY created_at DESC, id DESC', (station_id,))
                 else:
-                    cursor.execute('SELECT id, station_id, text, date, author_email FROM comments ORDER BY created_at DESC')
+                    cursor.execute('SELECT id, station_id, text, date, author_email FROM comments ORDER BY created_at DESC, id DESC')
                 
                 comments = cursor.fetchall()
                 for c in comments:
@@ -454,7 +454,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 conn = get_db_connection()
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute('SELECT * FROM comments ORDER BY created_at DESC')
+                cursor.execute('SELECT * FROM comments ORDER BY created_at DESC, id DESC')
                 comments = cursor.fetchall()
                 cursor.close()
                 conn.close()
