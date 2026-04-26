@@ -568,7 +568,8 @@ input[type="range"] {
     flex: 1;
     /* Чтобы занимала все доступное место */
     margin: 0;
-    padding: 8px 12px;
+    padding: 0 12px;
+    height: 36px;
 
     background: var(--color-accent);
     border: none;
