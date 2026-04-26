@@ -395,15 +395,51 @@ async function loadStations() {
 /** Проверка, находится ли объект геокодирования в России */
 function isInsideRussia(geoObj) {
     if (!geoObj) return false;
-    const meta = geoObj.properties.get('metaDataProperty.GeocoderMetaData');
-    if (!meta || !meta.Address) return false;
+    
+    // Пытаемся извлечь метаданные разными способами
+    const props = geoObj.properties;
+    const meta = props ? props.get('metaDataProperty.GeocoderMetaData') : null;
+    
+    if (!meta || !meta.Address) {
+        console.warn('isInsideRussia: No metadata or address found', geoObj);
+        return true; // Если данных нет, разрешаем (чтобы не блокировать всё подряд), но это не должно случаться
+    }
 
-    // Код страны RU — самый надежный признак
-    if (meta.Address.CountryCode === 'RU') return true;
+    const address = meta.Address;
+    
+    // 1. Проверяем CountryCode (обычно 'RU')
+    const countryCode = address.CountryCode;
+    if (countryCode === 'RU') return true;
+    if (countryCode && countryCode !== 'RU') {
+        console.log(`isInsideRussia: Rejected by CountryCode: ${countryCode}`);
+        return false;
+    }
 
-    // На всякий случай проверяем компоненты адреса
-    const components = meta.Address.Components || [];
-    return components.some(c => c.kind === 'country' && (c.name === 'Россия' || c.name === 'Russian Federation'));
+    // 2. Проверяем CountryNameCode (может быть в Country)
+    const countryNameCode = address.Country ? address.Country.CountryNameCode : null;
+    if (countryNameCode === 'RU') return true;
+    if (countryNameCode && countryNameCode !== 'RU') {
+        console.log(`isInsideRussia: Rejected by CountryNameCode: ${countryNameCode}`);
+        return false;
+    }
+
+    // 3. Проверяем компоненты адреса
+    const components = address.Components || [];
+    const countryComponent = components.find(c => c.kind === 'country');
+    if (countryComponent) {
+        const name = countryComponent.name;
+        if (name === 'Россия' || name === 'Russian Federation') return true;
+        console.log(`isInsideRussia: Rejected by country component name: ${name}`);
+        return false;
+    }
+
+    // 4. Проверяем полное название страны
+    const countryName = address.Country ? address.Country.CountryName : '';
+    if (countryName === 'Россия' || countryName === 'Russian Federation') return true;
+
+    // Если мы здесь, значит страна не Россия
+    console.log('isInsideRussia: Could not verify Russia as country', address);
+    return false;
 }
 
 function bindUIEvents() {
@@ -977,8 +1013,9 @@ async function onCitySearchClick() {
         const obj = res.geoObjects.get(0);
         if (obj) {
             if (!isInsideRussia(obj)) {
-                setStatus('Мы работаем только в РФ');
-                alert('Мы работаем только в РФ');
+                const country = obj.getCountry() || 'Вне РФ';
+                setStatus(`Мы работаем только в РФ (обнаружена локация: ${country})`);
+                alert(`Мы работаем только в РФ (обнаружена локация: ${country})`);
                 return;
             }
             const coords = obj.geometry.getCoordinates();
@@ -1016,10 +1053,14 @@ function onBuildRoute(fromInput, toInput, viaInputs = []) {
 
         // Проверка всех точек маршрута на нахождение в РФ
         for (let i = 0; i < results.length; i++) {
-            const obj = results[i].geoObjects.get(0);
+            const res = results[i];
+            const obj = (res.geoObjects && typeof res.geoObjects.get === 'function') ? res.geoObjects.get(0) : (typeof res.get === 'function' ? res.get(0) : null);
+            
             if (obj && !isInsideRussia(obj)) {
-                setStatus('Мы работаем только в РФ');
-                alert('Мы работаем только в РФ');
+                const country = (typeof obj.getCountry === 'function' ? obj.getCountry() : null) || 'Вне РФ';
+                console.log('Blocking route point outside Russia:', country, obj);
+                setStatus(`Мы работаем только в РФ (точка: ${country})`);
+                alert(`Мы работаем только в РФ (обнаружена точка: ${country}). Пожалуйста, используйте только города РФ.`);
                 return;
             }
         }
@@ -2046,8 +2087,9 @@ function useMyLocation(inputId) {
             ymaps.geocode([lat, lon]).then(function (res) {
                 const firstGeoObject = res.geoObjects.get(0);
                 if (firstGeoObject && !isInsideRussia(firstGeoObject)) {
-                    setStatus('Мы работаем только в РФ');
-                    alert('Мы работаем только в РФ');
+                    const country = firstGeoObject.getCountry() || 'Вне РФ';
+                    setStatus(`Мы работаем только в РФ (ваша локация: ${country})`);
+                    alert(`Мы работаем только в РФ (ваша локация: ${country})`);
                     return;
                 }
                 const address = firstGeoObject ? firstGeoObject.getAddressLine() : `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
