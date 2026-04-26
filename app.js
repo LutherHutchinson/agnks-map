@@ -52,6 +52,7 @@ let selectedWaypoints = [];
 
 // Пользовательские отзывы
 let userComments = {};
+let adminUsers = []; // Для поиска в админке
 let currentUser = null;
 let authMode = 'login'; // 'login', 'register'
 let favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
@@ -2736,6 +2737,15 @@ function initAdmin() {
 
     }
 
+    const userSearchInput = document.getElementById('admin-user-search');
+    if (userSearchInput) {
+        userSearchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filtered = adminUsers.filter(u => u.email.toLowerCase().includes(query));
+            renderAdminUsersList(filtered);
+        });
+    }
+
     if (closeAdmin) {
         closeAdmin.addEventListener('click', () => {
             adminModal.style.display = 'none';
@@ -2831,24 +2841,35 @@ async function loadAdminUsers() {
         const users = await api.call('/api/admin/users');
         // Сортировка на клиенте (от новых к старым)
         users.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        adminUsers = users; // Сохраняем для поиска
         
-        const list = document.getElementById('admin-users-list');
-        list.innerHTML = users.map(u => `
-            <tr>
-                <td>${u.email}</td>
-                <td>
-                    <input type="checkbox" ${u.is_admin ? 'checked' : ''} 
-                           onchange="toggleAdminStatus('${u.id}')">
-                </td>
-                <td>${new Date(u.created_at).toLocaleDateString()}</td>
-                <td>
-                    <button class="admin-btn-delete" onclick="deleteAdminUser('${u.id}')">Удалить</button>
-                </td>
-            </tr>
-        `).join('');
+        // Сбрасываем поиск при загрузке
+        const searchInput = document.getElementById('admin-user-search');
+        if (searchInput) searchInput.value = '';
+        
+        renderAdminUsersList(users);
     } catch (err) {
         console.error('Admin users load fail:', err);
     }
+}
+
+function renderAdminUsersList(users) {
+    const list = document.getElementById('admin-users-list');
+    if (!list) return;
+    
+    list.innerHTML = users.map(u => `
+        <tr>
+            <td>${u.email}</td>
+            <td>
+                <input type="checkbox" ${u.is_admin ? 'checked' : ''} 
+                       onchange="toggleAdminStatus('${u.id}')">
+            </td>
+            <td>${new Date(u.created_at).toLocaleDateString()}</td>
+            <td>
+                <button class="admin-btn-delete" onclick="deleteAdminUser('${u.id}')">Удалить</button>
+            </td>
+        </tr>
+    `).join('');
 }
 
 window.updateAdminReportStatus = async function(id, status) {
