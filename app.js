@@ -273,151 +273,150 @@ function normalizeName(name) {
         .replace(/[^а-яё0-9]/g, '');
 }
 
-    // Парсинг "сырых" данных Газпрома
-    function parseGazpromStation(el) {
-        const coords = el.gps.split(',').map(s => parseFloat(s.trim()));
-        if (!coords || coords.length !== 2 || isNaN(coords[0]) || !coords[0]) return null;
+// Парсинг "сырых" данных Газпрома
+function parseGazpromStation(el) {
+    const coords = el.gps.split(',').map(s => parseFloat(s.trim()));
+    if (!coords || coords.length !== 2 || isNaN(coords[0]) || !coords[0]) return null;
 
-        // Фильтруем строящиеся/планируемые
-        const nameClean = stripHtml(el.name || 'АГНКС');
-        const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен/i;
-        const addressRaw = el.address || '';
-        const scheduleRaw = el.schedule || '';
-        if (constructionKeywords.test(nameClean) || constructionKeywords.test(addressRaw) || constructionKeywords.test(scheduleRaw)) {
-            return null;
-        }
-
-        const nameFinal = nameClean.replace(/^Временно не работает \((.+)\)$/, '$1');
-        const addressClean = stripHtml((el.address || '').replace(/^Временно не работает \((.+)\)$/, '$1'));
-        const scheduleClean = el.schedule || '';
-        const isClosed = scheduleClean === 'Временно не работает';
-
-        return {
-            type: 'Feature',
-            id: 'gazprom_' + el.id,
-            geometry: {
-                type: 'Point',
-                coordinates: coords
-            },
-            properties: {
-                nameClean: nameFinal,
-                addressClean,
-                scheduleClean,
-                isClosed,
-                closeStatus: el.close, // Сохраняем поле close ("1" - ок, "0" - закрыто)
-                clusterCaption: el.city ? `${el.city}, ${nameClean}` : nameClean,
-                hintContent: nameClean,
-                rawCoords: coords,
-                gazpromUrl: el.url,
-                amenities: {
-                    around_the_clock: !!el.around_the_clock,
-                    payment_sce: !!el.payment_sce,
-                    payment_bc: !!el.payment_bc,
-                    payment_c: !!el.payment_c,
-                    cng: !!el.cng,
-                    lng: !!el.lng,
-                    cafe: !!el.cafe,
-                    shop: !!el.shop,
-                    wc: !!el.wc,
-                    charging: !!el.charging_for_electric_cars,
-                    washing: !!el.automatic_washing,
-                    tire_inflation: !!el.tire_inflation
-                },
-                updatedAt: el.updated_at
-            }
-        };
+    // Фильтруем строящиеся/планируемые
+    const nameClean = stripHtml(el.name || 'АГНКС');
+    const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен/i;
+    const addressRaw = el.address || '';
+    const scheduleRaw = el.schedule || '';
+    if (constructionKeywords.test(nameClean) || constructionKeywords.test(addressRaw) || constructionKeywords.test(scheduleRaw)) {
+        return null;
     }
 
+    const nameFinal = nameClean.replace(/^Временно не работает \((.+)\)$/, '$1');
+    const addressClean = stripHtml((el.address || '').replace(/^Временно не работает \((.+)\)$/, '$1'));
+    const scheduleClean = el.schedule || '';
+    const isClosed = scheduleClean === 'Временно не работает';
 
-    // Нормализация данных стандартной станции
-    function parseStation(item) {
-        let nameRaw = item.properties.hintContent || item.properties.balloonContentHeader || 'АГНКС';
-        let nameClean = stripHtml(nameRaw);
-        
-        // Если имя слишком короткое или стандартное, пробуем взять заголовок балуна
-        if (nameClean === 'АГНКС' && item.properties.balloonContentHeader) {
-            nameClean = stripHtml(item.properties.balloonContentHeader);
+    return {
+        type: 'Feature',
+        id: 'gazprom_' + el.id,
+        geometry: {
+            type: 'Point',
+            coordinates: coords
+        },
+        properties: {
+            nameClean: nameFinal,
+            addressClean,
+            scheduleClean,
+            isClosed,
+            closeStatus: el.close, // Сохраняем поле close ("1" - ок, "0" - закрыто)
+            clusterCaption: el.city ? `${el.city}, ${nameClean}` : nameClean,
+            hintContent: nameClean,
+            rawCoords: coords,
+            gazpromUrl: el.url,
+            amenities: {
+                around_the_clock: !!el.around_the_clock,
+                payment_sce: !!el.payment_sce,
+                payment_bc: !!el.payment_bc,
+                payment_c: !!el.payment_c,
+                cng: !!el.cng,
+                lng: !!el.lng,
+                cafe: !!el.cafe,
+                shop: !!el.shop,
+                wc: !!el.wc,
+                charging: !!el.charging_for_electric_cars,
+                washing: !!el.automatic_washing,
+                tire_inflation: !!el.tire_inflation
+            },
+            updatedAt: el.updated_at
         }
+    };
+}
 
-        // Сохраняем разрывы строк перед strip
-        const rawBody = (item.properties.balloonContentBody || '')
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/<\/p>/gi, '\n')
-            .replace(/подробнее/gi, '');
 
-        const bodyClean = stripHtml(rawBody);
+// Нормализация данных стандартной станции
+function parseStation(item) {
+    let nameRaw = item.properties.hintContent || item.properties.balloonContentHeader || 'АГНКС';
+    let nameClean = stripHtml(nameRaw);
+    
+    // Если имя слишком короткое или стандартное, пробуем взять заголовок балуна
+    if (nameClean === 'АГНКС' && item.properties.balloonContentHeader) {
+        nameClean = stripHtml(item.properties.balloonContentHeader);
+    }
 
-        const lines = bodyClean.split('\n')
-            .map(s => s.replace(/^(?:адрес|режим\s*(?:работы|раб)|тел(?:ефон)?|факс|т)\s*[:.-]?\s*/iu, '').trim())
-            .filter(Boolean);
+    // Сохраняем разрывы строк перед strip
+    const rawBody = (item.properties.balloonContentBody || '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/подробнее/gi, '');
 
-        const phoneRegex = /(?:\+7|8\s*[\(\-]?\d{3}|\bтел\.?|\bт\.\s*\(|\bфакс\b|\b8\s*\(\d{3,5}\))/i;
-        const permitRegex = /по\s*пропускам|пропускной\s*режим|спецпропуск|сотрудников\s*комбината|по\s*договору|только\s*для\s*юрлиц|только\s*служебн[а-я]*/i;
-        const scheduleRegex = /\b\d{1,2}[:.][0-5]\d\b|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв|временно не работает|закрыт/iu;
+    const bodyClean = stripHtml(rawBody);
 
-        // Фильтруем строящиеся/планируемые (проверяем все поля)
-        const headerRaw = item.properties.balloonContentHeader || '';
-        const hintRaw = item.properties.hintContent || '';
-        const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен/i;
+    const lines = bodyClean.split('\n')
+        .map(s => s.replace(/^(?:адрес|режим\s*(?:работы|раб)|тел(?:ефон)?|факс|т)\s*[:.-]?\s*/iu, '').trim())
+        .filter(Boolean);
 
-        if (constructionKeywords.test(hintRaw) || constructionKeywords.test(headerRaw) || constructionKeywords.test(rawBody)) {
-            return null;
-        }
+    const phoneRegex = /(?:\+7|8\s*[\(\-]?\d{3}|\bтел\.?|\bт\.\s*\(|\bфакс\b|\b8\s*\(\d{3,5}\))/i;
+    const permitRegex = /по\s*пропускам|пропускной\s*режим|спецпропуск|сотрудников\s*комбината|по\s*договору|только\s*для\s*юрлиц|только\s*служебн[а-я]*/i;
+    const scheduleRegex = /\b\d{1,2}[:.][0-5]\d\b|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв|временно не работает|закрыт/iu;
 
-        const addressLines = [], scheduleLines = [], phoneLines = [];
+    // Фильтруем строящиеся/планируемые (проверяем все поля)
+    const headerRaw = item.properties.balloonContentHeader || '';
+    const hintRaw = item.properties.hintContent || '';
+    const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен/i;
 
-        for (const line of lines) {
-            if (permitRegex.test(line)) {
-                // Если в строке с пропуском есть еще и часы работы, попробуем разделить
-                if (scheduleRegex.test(line) && line.includes('.')) {
-                    const parts = line.split(/[\.]\s+/);
-                    parts.forEach(p => {
-                        if (permitRegex.test(p)) addressLines.push(p);
-                        else if (scheduleRegex.test(p)) scheduleLines.push(p);
-                        else addressLines.push(p);
-                    });
-                } else {
-                    addressLines.push(line);
-                }
-            } else if (phoneRegex.test(line)) {
-                phoneLines.push(line);
-            } else if (scheduleRegex.test(line)) {
-                scheduleLines.push(line);
+    if (constructionKeywords.test(hintRaw) || constructionKeywords.test(headerRaw) || constructionKeywords.test(rawBody)) {
+        return null;
+    }
+
+    const addressLines = [], scheduleLines = [], phoneLines = [];
+
+    for (const line of lines) {
+        if (permitRegex.test(line)) {
+            // Если в строке с пропуском есть еще и часы работы, попробуем разделить
+            if (scheduleRegex.test(line) && line.includes('.')) {
+                const parts = line.split(/[\.]\s+/);
+                parts.forEach(p => {
+                    if (permitRegex.test(p)) addressLines.push(p);
+                    else if (scheduleRegex.test(p)) scheduleLines.push(p);
+                    else addressLines.push(p);
+                });
             } else {
                 addressLines.push(line);
             }
+        } else if (phoneRegex.test(line)) {
+            phoneLines.push(line);
+        } else if (scheduleRegex.test(line)) {
+            scheduleLines.push(line);
+        } else {
+            addressLines.push(line);
         }
+    }
 
-        return {
-            type: 'Feature',
-            id: 'main_' + item.id,
-            geometry: {
-                type: 'Point',
-                coordinates: (item.geometry.coordinates[0] > 100 || item.geometry.coordinates[1] < 20) 
-                    ? [item.geometry.coordinates[1], item.geometry.coordinates[0]] 
-                    : item.geometry.coordinates
+    return {
+        type: 'Feature',
+        id: 'main_' + item.id,
+        geometry: {
+            type: 'Point',
+            coordinates: (item.geometry.coordinates[0] > 100 || item.geometry.coordinates[1] < 20) 
+                ? [item.geometry.coordinates[1], item.geometry.coordinates[0]] 
+                : item.geometry.coordinates
+        },
+        properties: {
+            nameClean,
+            addressClean: addressLines.join(', '),
+            scheduleClean: scheduleLines.join('; ') || null,
+            phoneClean: phoneLines.join('; ') || null,
+            amenities: {
+                around_the_clock: /круглосуточно|24\/7/i.test(scheduleLines.join('; ')),
+                cng: true // Все заправки из этого файла — метановые
             },
-            properties: {
-                nameClean,
-                addressClean: addressLines.join(', '),
-                scheduleClean: scheduleLines.join('; ') || null,
-                phoneClean: phoneLines.join('; ') || null,
-                amenities: {
-                    around_the_clock: /круглосуточно|24\/7/i.test(scheduleLines.join('; ')),
-                    cng: true // Все заправки из этого файла — метановые
-                },
-                clusterCaption: item.properties.clusterCaption,
-                hintContent: nameClean,
-                rawCoords: item.geometry.coordinates
-            }
-        };
-    }
+            clusterCaption: item.properties.clusterCaption,
+            hintContent: nameClean,
+            rawCoords: item.geometry.coordinates
+        }
+    };
+}
 
-    function stripHtml(html) {
-        const div = document.createElement('div');
-        div.innerHTML = html;
-        return div.textContent || div.innerText || '';
-    }
+function stripHtml(html) {
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    return div.textContent || div.innerText || '';
 }
 
 
