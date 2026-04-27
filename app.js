@@ -149,6 +149,12 @@ async function init() {
     // Подписка на реальное время (раз в 15 секунд для экономии ресурсов)
     setInterval(fetchComments, 15000);
 
+    // Фоновое обновление базы заправок каждые 5 минут
+    setInterval(refreshStationsBackground, 300000);
+
+    // Фоновое обновление цветов меток каждую минуту (для учета времени открытия/закрытия)
+    setInterval(updateMarkerStatusAndColors, 60000);
+
 }
 
 
@@ -1568,6 +1574,49 @@ function filterAndRenderStations() {
     if (openId && objectManager.objects.getById(openId)) {
         objectManager.objects.balloon.open(openId);
     }
+}
+
+/**
+ * Плавное обновление статусов и цветов меток без полной перерисовки карты
+ */
+function updateMarkerStatusAndColors() {
+    console.log('[Status] Фоновое обновление статусов заправок...');
+    const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
+
+    allFeatures.forEach(feature => {
+        const oldStatus = feature.properties.timeStatus;
+        const newStatus = getStationStatus(feature);
+        
+        // Если статус изменился, обновляем метку
+        if (oldStatus !== newStatus) {
+            feature.properties.timeStatus = newStatus;
+            const [latS, lonS] = feature.geometry.coordinates;
+            
+            // Обновляем содержимое балуна
+            feature.properties.balloonContentBody = buildBalloonHtml(feature, latS, lonS, feature.id, isRouteActive);
+
+            // Определяем новый пресет
+            let preset = ICON_STATION_DEFAULT;
+            const isAdded = selectedWaypoints.some(w => w.id == feature.id);
+
+            if (isAdded) preset = ICON_STATION_ADDED;
+            else if (newStatus === 'vremenno') preset = 'islands#redDotIcon';
+            else if (newStatus === 'permit') preset = 'islands#blackDotIcon';
+            else if (newStatus === 'break') preset = 'islands#orangeDotIcon';
+            else if (newStatus === 'closed') preset = 'islands#grayDotIcon';
+            else if (newStatus === 'open') preset = 'islands#greenDotIcon';
+            else if (newStatus === 'always') preset = 'islands#darkGreenDotIcon';
+            else if (newStatus === 'no_data') preset = 'islands#blueDotIcon';
+
+            feature.options = { preset };
+
+            // Если объект сейчас отображается на карте, обновляем его свойства и опции в ObjectManager
+            if (objectManager.objects.getById(feature.id)) {
+                objectManager.objects.setObjectProperties(feature.id, feature.properties);
+                objectManager.objects.setObjectOptions(feature.id, feature.options);
+            }
+        }
+    });
 }
 
 // Проверяет, соответствует ли заправка фильтрам по удобствам
