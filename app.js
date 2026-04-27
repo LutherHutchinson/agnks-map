@@ -255,15 +255,19 @@ async function refreshStationsBackground() {
 
     allFeatures = newFeatures;
     
-    // Сохраняем в кэш
-    localStorage.setItem('agnks_stations_cache', JSON.stringify({
-        timestamp: Date.now(),
-        features: allFeatures
-    }));
+    // Сохраняем в кэш (с обработкой ошибок квоты)
+    try {
+        localStorage.setItem('agnks_stations_cache', JSON.stringify({
+            timestamp: Date.now(),
+            features: allFeatures
+        }));
+    } catch (e) {
+        console.warn('[Stations] Local storage quota exceeded, cache not saved');
+    }
 
     console.log(`[Stations] Processed ${allFeatures.length} stations in ${Math.round(performance.now() - startTime)}ms`);
     setStatus('');
-    filterAndRenderStations();
+    filterAndRenderStations(true); // Форсируем рендер, так как данные обновились
 }
 
 function extractPosId(name) {
@@ -1491,7 +1495,7 @@ function updateRouteSidebar() {
 // Фильтрация и рендер заправок
 let lastFilterParams = null;
 
-function filterAndRenderStations() {
+function filterAndRenderStations(force = false) {
     const showAll = document.getElementById('show-all').checked;
     const maxDistKm = parseFloat(document.getElementById('distance-slider').value);
     const amenityFilter = getSelectedAmenities();
@@ -1499,7 +1503,7 @@ function filterAndRenderStations() {
     
     // Проверяем, изменились ли параметры фильтрации
     const currentParams = JSON.stringify({ showAll, maxDistKm, amenityFilter, isRouteActive, routeId: routeGeoJsonCoords ? routeGeoJsonCoords.length : 0 });
-    if (lastFilterParams === currentParams) return;
+    if (!force && lastFilterParams === currentParams) return;
     lastFilterParams = currentParams;
 
     // Запоминаем ID открытого балуна
