@@ -146,103 +146,132 @@ async function init() {
         console.warn('Auth init failed:', e);
     }
 
-    // Подписка на реальное время (через короткий поллинг)
-    setInterval(fetchComments, 5000);
+    // Подписка на реальное время (раз в 15 секунд для экономии ресурсов)
+    setInterval(fetchComments, 15000);
 
 }
 
 
 // Загрузка базы станций
 async function loadStations() {
-    allFeatures = []; // Очищаем перед загрузкой
+    // 1. Проверяем кэш в localStorage
+    const CACHE_KEY = 'agnks_stations_cache';
+    const CACHE_TTL = 3600 * 1000; // 1 час
+    const cached = localStorage.getItem(CACHE_KEY);
+    
+    if (cached) {
+        try {
+            const { timestamp, features } = JSON.parse(cached);
+            if (Date.now() - timestamp < CACHE_TTL && features && features.length > 0) {
+                console.log(`[Stations] Loaded ${features.length} from local cache`);
+                allFeatures = features;
+                filterAndRenderStations();
+                // Всё равно фоново обновляем через 2 сек, чтобы данные не протухали
+                setTimeout(refreshStationsBackground, 2000);
+                return;
+            }
+        } catch (e) {
+            console.warn('Cache parse error', e);
+        }
+    }
+
+    await refreshStationsBackground();
+}
+
+async function refreshStationsBackground() {
+    const startTime = performance.now();
     setStatus('Загрузка базы станций…');
 
     let gazpromData = [], allData = [];
     try {
-        let resGazprom = await fetch('/api/gazprom_stations').catch(() => null);
-        if (!resGazprom || !resGazprom.ok) {
-            resGazprom = await fetch('/gazprom_stations.json').catch(() => null);
-        }
-        const resAll = await fetch('/stations.json').catch(() => null);
-
-        if (resGazprom && resGazprom.ok) {
-            try { gazpromData = await resGazprom.json(); } catch (e) { }
-        }
-        if (resAll && resAll.ok) {
-            try { allData = await resAll.json(); } catch (e) { }
-        }
+        const [resGazprom, resAll] = await Promise.all([
+            fetch('/api/gazprom_stations').then(r => r.ok ? r.json() : fetch('/gazprom_stations.json').then(r => r.json())).catch(() => []),
+            fetch('/stations.json').then(r => r.ok ? r.json() : []).catch(() => [])
+        ]);
+        gazpromData = resGazprom;
+        allData = resAll;
     } catch (err) {
         console.error('Ошибка загрузки станций:', err);
     }
 
     const itemsGazprom = gazpromData && gazpromData.elements ? gazpromData.elements : (Array.isArray(gazpromData) ? gazpromData : []);
     const itemsAll = Array.isArray(allData) ? allData : [];
-    console.log(`[Stations] Raw data: Gazprom=${itemsGazprom.length}, OSM=${itemsAll.length}`);
-
-    const tolerance = 0.01;
+    
+    const newFeatures = [];
     const processedPosIds = new Set();
-    const processedNames = new Map(); // name -> [lat, lon] for fuzzy proximity
+    const processedNames = new Map();
+    const coordGrid = new Set(); // Для быстрого поиска дубликатов O(1)
 
-    function extractPosId(name) {
-        if (!name) return null;
-        const match = name.match(/POS-(\d+)/i);
-        return match ? match[1] : null;
+    function getGridKey(lat, lon) {
+        return `${Math.round(lat * 100)},${Math.round(lon * 100)}`; // Сетка ~1.1км
     }
 
-    function normalizeName(name) {
-        if (!name) return '';
-        return name.toLowerCase()
-            .replace(/^(?:р\.п\.|г\.|с\.|п\.|ст\.|дер\.)\s+/g, '')
-            .replace(/[^а-яё0-9]/g, '');
-    }
-
-    // 1. Сначала парсим заправки Газпрома (Приоритет 1)
-    itemsGazprom.forEach(function (item) {
+    // 1. Парсим Газпром (Приоритет 1)
+    itemsGazprom.forEach(item => {
         if (item.gps) {
             const parsed = parseGazpromStation(item);
             if (parsed) {
-                allFeatures.push(parsed);
+                newFeatures.push(parsed);
                 const posId = extractPosId(parsed.properties.nameClean);
                 if (posId) processedPosIds.add(posId);
                 processedNames.set(normalizeName(parsed.properties.nameClean), parsed.geometry.coordinates);
+                coordGrid.add(getGridKey(parsed.geometry.coordinates[0], parsed.geometry.coordinates[1]));
             }
         }
     });
 
-
-    // 3. Затем парсим общую базу stations.json (Приоритет 3)
-    itemsAll.forEach(function (item) {
+    // 2. Парсим OSM (Приоритет 3)
+    itemsAll.forEach(item => {
         if (item.type === 'Feature' && item.geometry && item.properties) {
             const parsed = parseStation(item);
             if (!parsed) return;
+
+            const [latNew, lonNew] = parsed.geometry.coordinates;
+            const gridKey = getGridKey(latNew, lonNew);
+
+            // Быстрая проверка на дубликаты по координатам
+            if (coordGrid.has(gridKey)) return;
 
             const name = parsed.properties.nameClean;
             const posId = extractPosId(name);
             if (posId && processedPosIds.has(posId)) return;
 
             const normName = normalizeName(name);
-            const [latNew, lonNew] = parsed.geometry.coordinates;
-
             if (processedNames.has(normName)) {
                 const [latE, lonE] = processedNames.get(normName);
                 if (Math.abs(latE - latNew) < 0.1 && Math.abs(lonE - lonNew) < 0.1) return;
             }
 
-            const isDuplicate = allFeatures.some(existing => {
-                const [latE, lonE] = existing.geometry.coordinates;
-                return Math.abs(latE - latNew) < tolerance && Math.abs(lonE - lonNew) < tolerance;
-            });
-
-            if (!isDuplicate) {
-                allFeatures.push(parsed);
-                if (posId) processedPosIds.add(posId);
-                processedNames.set(normName, [latNew, lonNew]);
-            }
+            newFeatures.push(parsed);
+            coordGrid.add(gridKey);
         }
     });
 
+    allFeatures = newFeatures;
+    
+    // Сохраняем в кэш
+    localStorage.setItem('agnks_stations_cache', JSON.stringify({
+        timestamp: Date.now(),
+        features: allFeatures
+    }));
+
+    console.log(`[Stations] Processed ${allFeatures.length} stations in ${Math.round(performance.now() - startTime)}ms`);
     setStatus('');
     filterAndRenderStations();
+}
+
+function extractPosId(name) {
+    if (!name) return null;
+    const match = name.match(/POS-(\d+)/i);
+    return match ? match[1] : null;
+}
+
+function normalizeName(name) {
+    if (!name) return '';
+    return name.toLowerCase()
+        .replace(/^(?:р\.п\.|г\.|с\.|п\.|ст\.|дер\.)\s+/g, '')
+        .replace(/[^а-яё0-9]/g, '');
+}
 
     // Парсинг "сырых" данных Газпрома
     function parseGazpromStation(el) {
@@ -585,6 +614,14 @@ function bindUIEvents() {
         // Клик по кнопке — показать окно
         guideBtn.addEventListener('click', () => {
             guideModal.style.display = 'flex';
+            
+            // Ленивая загрузка видео
+            const video = document.getElementById('guide-video');
+            if (video && !video.src) {
+                video.src = video.getAttribute('data-src');
+                video.load();
+            }
+
             if (guideList && guideList.children.length === 0) {
                 loadGuide();
             }
@@ -1420,18 +1457,24 @@ function updateRouteSidebar() {
 }
 
 // Фильтрация и рендер заправок
+let lastFilterParams = null;
+
 function filterAndRenderStations() {
     const showAll = document.getElementById('show-all').checked;
     const maxDistKm = parseFloat(document.getElementById('distance-slider').value);
-    const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
     const amenityFilter = getSelectedAmenities();
+    const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
+    
+    // Проверяем, изменились ли параметры фильтрации
+    const currentParams = JSON.stringify({ showAll, maxDistKm, amenityFilter, isRouteActive, routeId: routeGeoJsonCoords ? routeGeoJsonCoords.length : 0 });
+    if (lastFilterParams === currentParams) return;
+    lastFilterParams = currentParams;
 
-    // Запоминаем ID открытого балуна, чтобы он не закрылся при перерисовке
+    // Запоминаем ID открытого балуна
     const openBalloonData = objectManager.objects.balloon.getData();
     const openId = openBalloonData ? openBalloonData.id : null;
 
     objectManager.removeAll();
-
     const routeLine = buildTurfRouteLine(showAll, isRouteActive);
 
     const filtered = allFeatures.filter(feature => {
