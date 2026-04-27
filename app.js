@@ -1159,12 +1159,17 @@ function onBuildRouteFuelClick() {
     onBuildRoute(fromInput, toInput, viaInputs);
 }
 
+// Глобальные переменные для кэширования расчета кандидатов
+let cachedCandidates = null;
+let cachedRouteKey = null;
+
 async function planFuelRoute() {
     if (!routeGeoJsonCoords || routeGeoJsonCoords.length < 2) {
         console.warn('Fuel Planning: No route coordinates available');
         return;
     }
 
+    const startTime = performance.now();
     const consumption = parseFloat(document.getElementById('fuel-consumption').value) || 10;
     const tankVolume = parseFloat(document.getElementById('fuel-tank').value) || 20;
     const initialPercent = parseFloat(document.getElementById('fuel-initial').value) || 50;
@@ -1188,33 +1193,55 @@ async function planFuelRoute() {
     const baseLine = turf.lineString(routeGeoJsonCoords);
     const totalDistKm = turf.length(baseLine, { units: 'kilometers' });
 
-    // 1. Собираем всех кандидатов в радиусе 15км от трассы
-    const allCngStations = allFeatures.filter(f => {
-        const props = f.properties;
-        return (props.amenities && props.amenities.cng) || (props.categories && props.categories.cng);
-    });
+    // Проверяем кэш кандидатов (если маршрут тот же, не пересчитываем проекции)
+    const currentRouteKey = `${routeGeoJsonCoords.length}_${routeGeoJsonCoords[0][0]}_${routeGeoJsonCoords[routeGeoJsonCoords.length-1][0]}`;
+    let candidates = [];
 
-    const candidates = [];
-    allCngStations.forEach(st => {
-        const [stLat, stLon] = st.geometry.coordinates;
-        const stPoint = turf.point([stLon, stLat]);
+    if (cachedRouteKey === currentRouteKey && cachedCandidates) {
+        candidates = cachedCandidates;
+        console.log(`[Planning] Using ${candidates.length} cached candidates`);
+    } else {
+        // 1. Упрощаем линию для ускорения расчетов расстояний
+        const simplifiedLine = turf.simplify(baseLine, { tolerance: 0.001, highQuality: false });
+        
+        // 2. Рассчитываем Bounding Box с запасом ~20км
+        const baseBbox = turf.bbox(baseLine);
+        const pad = 0.2;
+        const bbox = [baseBbox[0] - pad, baseBbox[1] - pad, baseBbox[2] + pad, baseBbox[3] + pad];
 
-        // Расстояние от заправки до всей линии маршрута
-        const distToLine = turf.pointToLineDistance(stPoint, baseLine, { units: 'kilometers' });
-        if (distToLine < 15) {
-            // Проецируем точку на линию, чтобы узнать расстояние от начала маршрута
-            const snapped = turf.nearestPointOnLine(baseLine, stPoint, { units: 'kilometers' });
-            candidates.push({
-                st,
-                dist: snapped.properties.location, // Дистанция от старта в км
-                coords: [stLat, stLon]
-            });
-        }
-    });
+        // 3. Собираем всех кандидатов
+        const allCngStations = allFeatures.filter(f => {
+            const props = f.properties;
+            return (props.amenities && props.amenities.cng) || (props.categories && props.categories.cng);
+        });
 
-    // Сортируем кандидатов по дистанции от начала
-    candidates.sort((a, b) => a.dist - b.dist);
-    console.log(`Found ${candidates.length} candidate stations near route.`);
+        allCngStations.forEach(st => {
+            const [stLat, stLon] = st.geometry.coordinates;
+            
+            // Быстрый фильтр по BBox (O(1))
+            if (stLon < bbox[0] || stLon > bbox[2] || stLat < bbox[1] || stLat > bbox[3]) return;
+
+            const stPoint = turf.point([stLon, stLat]);
+            // Расстояние до упрощенной линии
+            const distToLine = turf.pointToLineDistance(stPoint, simplifiedLine, { units: 'kilometers' });
+            
+            if (distToLine < 15) {
+                // Проецируем на ОРИГИНАЛЬНУЮ линию для точности дистанции
+                const snapped = turf.nearestPointOnLine(baseLine, stPoint, { units: 'kilometers' });
+                candidates.push({
+                    st,
+                    dist: snapped.properties.location,
+                    coords: [stLat, stLon]
+                });
+            }
+        });
+
+        // Сортируем и кэшируем
+        candidates.sort((a, b) => a.dist - b.dist);
+        cachedCandidates = candidates;
+        cachedRouteKey = currentRouteKey;
+        console.log(`[Planning] Found ${candidates.length} candidates in ${Math.round(performance.now() - startTime)}ms`);
+    }
 
     const stopsToAdd = [];
     let d = 0;
