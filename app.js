@@ -1240,7 +1240,8 @@ async function planFuelRoute() {
                 candidates.push({
                     st,
                     dist: snapped.properties.location,
-                    coords: [stLat, stLon]
+                    coords: [stLat, stLon],
+                    routeCoords: snapped.geometry.coordinates // [lon, lat]
                 });
             }
         });
@@ -1286,7 +1287,9 @@ async function planFuelRoute() {
             id: String(bestCandidate.st.id),
             name: bestCandidate.st.properties.nameClean,
             lat: bestCandidate.coords[0],
-            lon: bestCandidate.coords[1]
+            lon: bestCandidate.coords[1],
+            routeLat: bestCandidate.routeCoords ? bestCandidate.routeCoords[1] : bestCandidate.coords[0],
+            routeLon: bestCandidate.routeCoords ? bestCandidate.routeCoords[0] : bestCandidate.coords[1]
         });
 
         lastStopDist = bestCandidate.dist;
@@ -1373,8 +1376,8 @@ function requestRouteAndRedraw() {
     const routePoints = [
         originGeo,
         ...allStops.map(s => ({ 
-            type: s.type === 'via' ? 'viaPoint' : 'wayPoint', 
-            point: [s.lat, s.lon] 
+            type: 'viaPoint', 
+            point: [s.routeLat || s.lat, s.routeLon || s.lon] 
         })),
         destGeo
     ];
@@ -1435,7 +1438,11 @@ function requestRouteAndRedraw() {
 
     }, function (error) {
         console.error('Яндекс маршруты:', error);
-        setStatus('Ошибка маршрутизации (возможно нет API-ключа Яндекса): ' + error.message);
+        let msg = error.message;
+        if (msg === "can't construct a route") {
+            msg = "Не удалось проложить путь. Возможно, одна из точек недоступна для проезда или маршрут слишком сложный.";
+        }
+        setStatus('Ошибка маршрутизации: ' + msg);
     });
 }
 
@@ -2165,11 +2172,27 @@ window.addStationToRoute = function (stationId) {
         return;
     }
 
+    let routeLat = station.geometry.coordinates[0];
+    let routeLon = station.geometry.coordinates[1];
+
+    if (baseRouteGeoJsonCoords && baseRouteGeoJsonCoords.length >= 2) {
+        try {
+            const baseLine = turf.lineString(baseRouteGeoJsonCoords);
+            const snapped = turf.nearestPointOnLine(baseLine, turf.point([routeLon, routeLat]));
+            routeLat = snapped.geometry.coordinates[1];
+            routeLon = snapped.geometry.coordinates[0];
+        } catch (e) {
+            console.warn('Could not snap station to route:', e);
+        }
+    }
+
     selectedWaypoints.push({
         id: station.id,
         name: station.properties.nameClean,
         lat: station.geometry.coordinates[0],
-        lon: station.geometry.coordinates[1]
+        lon: station.geometry.coordinates[1],
+        routeLat,
+        routeLon
     });
 
     // Сортировка по порядку на маршруте
