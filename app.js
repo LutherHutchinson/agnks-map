@@ -139,7 +139,7 @@ async function init() {
 
     initBottomSheetResize();
     bindUIEvents();
-    
+
     try {
         initAuth();
     } catch (e) {
@@ -164,7 +164,7 @@ async function loadStations() {
     const CACHE_KEY = 'agnks_stations_cache';
     const CACHE_TTL = 3600 * 1000; // 1 час
     const cached = localStorage.getItem(CACHE_KEY);
-    
+
     if (cached) {
         try {
             const { timestamp, features } = JSON.parse(cached);
@@ -202,7 +202,7 @@ async function refreshStationsBackground() {
 
     const itemsGazprom = gazpromData && gazpromData.elements ? gazpromData.elements : (Array.isArray(gazpromData) ? gazpromData : []);
     const itemsAll = Array.isArray(allData) ? allData : [];
-    
+
     const newFeatures = [];
     const processedPosIds = new Set();
     const processedNames = new Map();
@@ -254,7 +254,7 @@ async function refreshStationsBackground() {
     });
 
     allFeatures = newFeatures;
-    
+
     // Сохраняем в кэш (с обработкой ошибок квоты)
     try {
         localStorage.setItem('agnks_stations_cache', JSON.stringify({
@@ -343,7 +343,7 @@ function parseGazpromStation(el) {
 function parseStation(item) {
     let nameRaw = item.properties.hintContent || item.properties.balloonContentHeader || 'АГНКС';
     let nameClean = stripHtml(nameRaw);
-    
+
     // Если имя слишком короткое или стандартное, пробуем взять заголовок балуна
     if (nameClean === 'АГНКС' && item.properties.balloonContentHeader) {
         nameClean = stripHtml(item.properties.balloonContentHeader);
@@ -403,8 +403,8 @@ function parseStation(item) {
         id: 'main_' + item.id,
         geometry: {
             type: 'Point',
-            coordinates: (item.geometry.coordinates[0] > 100 || item.geometry.coordinates[1] < 20) 
-                ? [item.geometry.coordinates[1], item.geometry.coordinates[0]] 
+            coordinates: (item.geometry.coordinates[0] > 100 || item.geometry.coordinates[1] < 20)
+                ? [item.geometry.coordinates[1], item.geometry.coordinates[0]]
                 : item.geometry.coordinates
         },
         properties: {
@@ -433,18 +433,18 @@ function stripHtml(html) {
 /** Проверка, находится ли объект геокодирования в России */
 function isInsideRussia(geoObj) {
     if (!geoObj) return false;
-    
+
     // Пытаемся извлечь метаданные разными способами
     const props = geoObj.properties;
     const meta = props ? props.get('metaDataProperty.GeocoderMetaData') : null;
-    
+
     if (!meta || !meta.Address) {
         console.warn('isInsideRussia: No metadata or address found', geoObj);
         return true; // Если данных нет, разрешаем (чтобы не блокировать всё подряд), но это не должно случаться
     }
 
     const address = meta.Address;
-    
+
     // 1. Проверяем CountryCode (обычно 'RU')
     const countryCode = address.CountryCode;
     if (countryCode === 'RU') return true;
@@ -623,7 +623,7 @@ function bindUIEvents() {
         // Клик по кнопке — показать окно
         guideBtn.addEventListener('click', () => {
             guideModal.style.display = 'flex';
-            
+
             // Ленивая загрузка видео
             const video = document.getElementById('guide-video');
             if (video && !video.src) {
@@ -930,7 +930,7 @@ function closeAuthModal() {
 function translateAuthError(msg) {
     if (!msg) return 'Неизвестная ошибка';
     const lower = msg.toLowerCase();
-    
+
     if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
         return 'Неверный email или пароль';
     }
@@ -1101,7 +1101,7 @@ function onBuildRoute(fromInput, toInput, viaInputs = []) {
         for (let i = 0; i < results.length; i++) {
             const res = results[i];
             const obj = (res.geoObjects && typeof res.geoObjects.get === 'function') ? res.geoObjects.get(0) : (typeof res.get === 'function' ? res.get(0) : null);
-            
+
             if (obj && !isInsideRussia(obj)) {
                 const country = (typeof obj.getCountry === 'function' ? obj.getCountry() : null) || 'Вне РФ';
                 console.log('Blocking route point outside Russia:', country, obj);
@@ -1203,7 +1203,7 @@ async function planFuelRoute() {
     const totalDistKm = turf.length(baseLine, { units: 'kilometers' });
 
     // Проверяем кэш кандидатов (если маршрут тот же, не пересчитываем проекции)
-    const currentRouteKey = `${routeGeoJsonCoords.length}_${routeGeoJsonCoords[0][0]}_${routeGeoJsonCoords[routeGeoJsonCoords.length-1][0]}`;
+    const currentRouteKey = `${routeGeoJsonCoords.length}_${routeGeoJsonCoords[0][0]}_${routeGeoJsonCoords[routeGeoJsonCoords.length - 1][0]}`;
     let candidates = [];
 
     if (cachedRouteKey === currentRouteKey && cachedCandidates) {
@@ -1212,7 +1212,7 @@ async function planFuelRoute() {
     } else {
         // 1. Упрощаем линию для ускорения расчетов расстояний
         const simplifiedLine = turf.simplify(baseLine, { tolerance: 0.001, highQuality: false });
-        
+
         // 2. Рассчитываем Bounding Box с запасом ~20км
         const baseBbox = turf.bbox(baseLine);
         const pad = 0.2;
@@ -1226,14 +1226,14 @@ async function planFuelRoute() {
 
         allCngStations.forEach(st => {
             const [stLat, stLon] = st.geometry.coordinates;
-            
+
             // Быстрый фильтр по BBox (O(1))
             if (stLon < bbox[0] || stLon > bbox[2] || stLat < bbox[1] || stLat > bbox[3]) return;
 
             const stPoint = turf.point([stLon, stLat]);
             // Расстояние до упрощенной линии
             const distToLine = turf.pointToLineDistance(stPoint, simplifiedLine, { units: 'kilometers' });
-            
+
             if (distToLine < 15) {
                 // Проецируем на ОРИГИНАЛЬНУЮ линию для точности дистанции
                 const snapped = turf.nearestPointOnLine(baseLine, stPoint, { units: 'kilometers' });
@@ -1353,13 +1353,17 @@ function requestRouteAndRedraw() {
     setStatus('Прокладываю маршрут…');
 
     let allStops = [];
-    userViaPoints.forEach(v => allStops.push({ type: 'via', lat: v.lat, lon: v.lon, name: v.name }));
+    userViaPoints.forEach((v, idx) => allStops.push({ type: 'via', lat: v.lat, lon: v.lon, name: v.name, originalIndex: idx }));
     selectedWaypoints.forEach((w, index) => allStops.push({ type: 'gas', lat: w.lat, lon: w.lon, name: w.name, gasIndex: index }));
 
     // Если есть базовый маршрут, отсортируем все остановки по расстоянию вдоль него
     if (baseRouteGeoJsonCoords) {
         const tempBaseLine = turf.lineString(baseRouteGeoJsonCoords);
         allStops.sort((a, b) => {
+            // Если оба пункта — города, сохраняем их исходный порядок
+            if (a.type === 'via' && b.type === 'via') {
+                return a.originalIndex - b.originalIndex;
+            }
             const locA = turf.nearestPointOnLine(tempBaseLine, turf.point([a.lon, a.lat])).properties.location || 0;
             const locB = turf.nearestPointOnLine(tempBaseLine, turf.point([b.lon, b.lat])).properties.location || 0;
             return locA - locB;
@@ -1368,7 +1372,10 @@ function requestRouteAndRedraw() {
 
     const routePoints = [
         originGeo,
-        ...allStops.map(s => ({ type: 'wayPoint', point: [s.lat, s.lon] })),
+        ...allStops.map(s => ({ 
+            type: s.type === 'via' ? 'viaPoint' : 'wayPoint', 
+            point: [s.lat, s.lon] 
+        })),
         destGeo
     ];
 
@@ -1446,12 +1453,15 @@ function updateRouteSidebar() {
     container.style.display = 'block';
 
     let allStops = [];
-    userViaPoints.forEach(v => allStops.push({ type: 'via', lat: v.lat, lon: v.lon, name: v.name }));
+    userViaPoints.forEach((v, idx) => allStops.push({ type: 'via', lat: v.lat, lon: v.lon, name: v.name, originalIndex: idx }));
     selectedWaypoints.forEach((w, index) => allStops.push({ type: 'gas', lat: w.lat, lon: w.lon, name: w.name, gasIndex: index }));
 
     if (baseRouteGeoJsonCoords) {
         const tempBaseLine = turf.lineString(baseRouteGeoJsonCoords);
         allStops.sort((a, b) => {
+            if (a.type === 'via' && b.type === 'via') {
+                return a.originalIndex - b.originalIndex;
+            }
             const locA = turf.nearestPointOnLine(tempBaseLine, turf.point([a.lon, a.lat])).properties.location || 0;
             const locB = turf.nearestPointOnLine(tempBaseLine, turf.point([b.lon, b.lat])).properties.location || 0;
             return locA - locB;
@@ -1500,7 +1510,7 @@ function filterAndRenderStations(force = false) {
     const maxDistKm = parseFloat(document.getElementById('distance-slider').value);
     const amenityFilter = getSelectedAmenities();
     const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
-    
+
     // Проверяем, изменились ли параметры фильтрации
     const currentParams = JSON.stringify({ showAll, maxDistKm, amenityFilter, isRouteActive, routeId: routeGeoJsonCoords ? routeGeoJsonCoords.length : 0 });
     if (!force && lastFilterParams === currentParams) return;
@@ -1590,12 +1600,12 @@ function updateMarkerStatusAndColors() {
     allFeatures.forEach(feature => {
         const oldStatus = feature.properties.timeStatus;
         const newStatus = getStationStatus(feature);
-        
+
         // Если статус изменился, обновляем метку
         if (oldStatus !== newStatus) {
             feature.properties.timeStatus = newStatus;
             const [latS, lonS] = feature.geometry.coordinates;
-            
+
             // Обновляем содержимое балуна
             feature.properties.balloonContentBody = buildBalloonHtml(feature, latS, lonS, feature.id, isRouteActive);
 
@@ -2270,7 +2280,7 @@ async function fetchComments() {
         const data = await api.call('/api/comments');
         if (data && data.length > 0) {
             userComments = {};
-            
+
             // Сортируем на клиенте для надежности (от новых к старым)
             data.sort((a, b) => {
                 // Если есть created_at, лучше по нему, но в data его может не быть.
@@ -2975,7 +2985,7 @@ async function loadAdminReports() {
         const reports = await api.call('/api/admin/error_reports');
         // Сортировка на клиенте (от новых к старым)
         reports.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        
+
         const list = document.getElementById('admin-reports-list');
         list.innerHTML = reports.map(r => `
             <tr class="report-status-${r.status}">
@@ -3007,7 +3017,7 @@ async function loadAdminReports() {
 async function loadAdminComments() {
     try {
         const comments = await api.call('/api/admin/comments');
-        
+
         // Сортировка на клиенте (от новых к старым)
         const parseDate = (s) => {
             if (!s) return 0;
@@ -3042,11 +3052,11 @@ async function loadAdminUsers() {
         // Сортировка на клиенте (от новых к старым)
         users.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         adminUsers = users; // Сохраняем для поиска
-        
+
         // Сбрасываем поиск при загрузке
         const searchInput = document.getElementById('admin-user-search');
         if (searchInput) searchInput.value = '';
-        
+
         renderAdminUsersList(users);
     } catch (err) {
         console.error('Admin users load fail:', err);
@@ -3056,7 +3066,7 @@ async function loadAdminUsers() {
 function renderAdminUsersList(users) {
     const list = document.getElementById('admin-users-list');
     if (!list) return;
-    
+
     list.innerHTML = users.map(u => `
         <tr>
             <td>${u.email}</td>
@@ -3072,7 +3082,7 @@ function renderAdminUsersList(users) {
     `).join('');
 }
 
-window.updateAdminReportStatus = async function(id, status) {
+window.updateAdminReportStatus = async function (id, status) {
     try {
         await api.call(`/api/admin/error_reports/status/${id}`, 'POST', { status });
         loadAdminReports();
@@ -3081,7 +3091,7 @@ window.updateAdminReportStatus = async function(id, status) {
     }
 };
 
-window.toggleAdminStatus = async function(id) {
+window.toggleAdminStatus = async function (id) {
     try {
         await api.call(`/api/admin/users/toggle_admin/${id}`, 'POST');
         loadAdminUsers();
@@ -3090,7 +3100,7 @@ window.toggleAdminStatus = async function(id) {
     }
 };
 
-window.deleteAdminUser = async function(id) {
+window.deleteAdminUser = async function (id) {
     if (!confirm('Удалить этого пользователя?')) return;
     try {
         await api.call(`/api/admin/users/${id}`, 'DELETE');
@@ -3100,7 +3110,7 @@ window.deleteAdminUser = async function(id) {
     }
 };
 
-window.deleteAdminReport = async function(id) {
+window.deleteAdminReport = async function (id) {
 
     if (!confirm('Удалить этот отчет?')) return;
     try {
@@ -3111,7 +3121,7 @@ window.deleteAdminReport = async function(id) {
     }
 };
 
-window.deleteAdminComment = async function(id) {
+window.deleteAdminComment = async function (id) {
     if (!confirm('Удалить этот отзыв?')) return;
     try {
         await api.call(`/api/admin/comments/${id}`, 'DELETE');

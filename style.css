@@ -76,7 +76,7 @@ h3 {
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border: 1px solid rgba(255, 255, 255, 0.3);
-    
+
     transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -212,7 +212,8 @@ input[type="number"]:focus {
     z-index: 10;
 }
 
-.connector-swap-btn, .connector-add-btn {
+.connector-swap-btn,
+.connector-add-btn {
     position: absolute;
     top: -14px;
     width: 28px !important;
@@ -240,7 +241,8 @@ input[type="number"]:focus {
     right: 44px;
 }
 
-.connector-swap-btn:hover, .connector-add-btn:hover {
+.connector-swap-btn:hover,
+.connector-add-btn:hover {
     background: #f5f5f5 !important;
     transform: scale(1.1);
     box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
@@ -919,7 +921,8 @@ input[type="range"] {
 
 .balloon-actions {
     display: flex;
-    align-items: stretch; /* Растягиваем, чтобы высота была одинаковой */
+    align-items: stretch;
+    /* Растягиваем, чтобы высота была одинаковой */
     gap: 8px;
     margin-top: 10px;
     width: 100%;
@@ -1558,17 +1561,20 @@ input[type="range"] {
 
 .fuel-inputs-row {
     display: flex;
-    flex-wrap: wrap; /* Разрешаем перенос на новую строку */
+    flex-wrap: wrap;
+    /* Разрешаем перенос на новую строку */
     gap: 12px;
     width: 100%;
 }
 
 .fuel-input-group {
-    flex: 1 1 80px; /* Позволяем расти и сжиматься, но минимум 80px */
+    flex: 1 1 80px;
+    /* Позволяем расти и сжиматься, но минимум 80px */
     display: flex;
     flex-direction: column;
     gap: 4px;
-    min-width: 0; /* Важно для flex-контейнеров */
+    min-width: 0;
+    /* Важно для flex-контейнеров */
 }
 
 .fuel-input-group label {
@@ -1811,6 +1817,7 @@ input[type="range"] {
     background-color: var(--color-danger);
     color: white;
 }
+
 /* Admin Panel Styles */
 .admin-modal-content {
     max-width: 900px;
@@ -1829,7 +1836,8 @@ input[type="range"] {
 
 .admin-tab-btn {
     padding: 12px 24px;
-    background: none !important; /* Убираем желтый фон */
+    background: none !important;
+    /* Убираем желтый фон */
     border: none !important;
     border-bottom: 3px solid transparent !important;
     cursor: pointer;
@@ -1864,7 +1872,8 @@ input[type="range"] {
     font-size: 13px;
 }
 
-.admin-table th, .admin-table td {
+.admin-table th,
+.admin-table td {
     padding: 12px;
     text-align: left;
     border-bottom: 1px solid var(--color-border-light);
@@ -1956,4 +1965,3 @@ input[type="range"] {
     border-color: var(--color-accent);
     box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.1);
 }
-
