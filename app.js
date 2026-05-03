@@ -146,14 +146,14 @@ async function init() {
         console.warn('Auth init failed:', e);
     }
 
-    // Подписка на реальное время (раз в 15 секунд для экономии ресурсов)
-    setInterval(fetchComments, 15000);
+    // Подписка на реальное время (ускорена для эффекта мгновенности)
+    setInterval(fetchComments, 5000);
 
     // Фоновое обновление базы заправок каждые 5 минут
     setInterval(refreshStationsBackground, 300000);
 
-    // Фоновое обновление цветов меток каждую минуту (для учета времени открытия/закрытия)
-    setInterval(updateMarkerStatusAndColors, 60000);
+    // Фоновое обновление цветов меток каждые 30 секунд (ускорена для эффекта мгновенности)
+    setInterval(updateMarkerStatusAndColors, 30000);
 
 }
 
@@ -2326,7 +2326,8 @@ async function fetchComments() {
                     id: c.id,
                     text: c.text,
                     date: c.date,
-                    author_email: c.author_email
+                    author_email: c.author_email,
+                    created_at: c.created_at
                 });
             });
             const countChanged = (window.totalCommentsLoaded !== data.length);
@@ -2354,17 +2355,30 @@ function buildCommentsHtml(stationId) {
     if (comments.length === 0) {
         return '<div class="no-comments">Пока нет отзывов. Будьте первым!</div>';
     }
+
+    const now = new Date().getTime();
+
     // Отображаем как есть (уже отсортировано от новых к старым при загрузке)
-    return comments.map(c => `
-        <div class="comment-item">
-            <div class="comment-text">${escapeHtml(c.text)}</div>
-            <div class="comment-meta">
-                ${c.author_email ? `<span class="comment-author" title="${c.author_email}">${c.author_email.split('@')[0]}</span> • ` : ''}
-                ${c.date}
+    return comments.map(c => {
+        let isNew = false;
+        if (c.created_at) {
+            const commentTime = new Date(c.created_at).getTime();
+            isNew = (now - commentTime) < 60000; // Подсвечиваем в течение минуты
+        } else if (c.isOptimistic) {
+            isNew = true;
+        }
+
+        return `
+            <div class="comment-item ${isNew ? 'new-comment' : ''}">
+                <div class="comment-text">${escapeHtml(c.text)}</div>
+                <div class="comment-meta">
+                    ${c.author_email ? `<span class="comment-author" title="${c.author_email}">${c.author_email.split('@')[0]}</span> • ` : ''}
+                    ${c.date} ${c.isOptimistic ? '<span style="font-style:italic; font-size:9px;">(отправка...)</span>' : ''}
+                </div>
+                ${c.id && c.id.length > 5 ? `<div style="display:none" class="comment-id-marker" data-id="${c.id}"></div>` : ''}
             </div>
-            ${c.id && c.id.length > 5 ? `<div style="display:none" class="comment-id-marker" data-id="${c.id}"></div>` : ''}
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
 function escapeHtml(text) {
@@ -2381,24 +2395,42 @@ async function onCommentSubmit(stationId) {
     const now = new Date();
     const dateStr = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
+    // OPTIMISTIC UI: Добавляем комментарий локально сразу
+    const newComment = {
+        station_id: String(stationId),
+        text,
+        date: dateStr,
+        author_email: currentUser?.email || 'Вы',
+        isOptimistic: true,
+        created_at: now.toISOString() // Временная метка для анимации
+    };
+
+    if (!userComments[stationId]) userComments[stationId] = [];
+    userComments[stationId].unshift(newComment);
+
+    // Сразу очищаем поле и обновляем UI в балуне
+    input.value = '';
+    const listEl = document.getElementById(`comments-list-${stationId}`);
+    if (listEl) {
+        listEl.innerHTML = buildCommentsHtml(stationId);
+    }
+    toggleCommentForm(stationId);
+
     try {
-        const newComment = {
+        await api.call('/api/comments', 'POST', {
             station_id: String(stationId),
             text,
             date: dateStr,
             author_email: currentUser?.email || null
-        };
+        });
 
-        await api.call('/api/comments', 'POST', newComment);
-
-        input.value = '';
-        if (!userComments[stationId]) userComments[stationId] = [];
-        userComments[stationId].unshift(newComment);
-
-        objectManager.objects.balloon.setData(objectManager.objects.getById(stationId));
-        toggleCommentForm(stationId);
+        // После успешной отправки мы не удаляем optimistic сразу, 
+        // он будет заменен при следующем fetchComments (каждые 5 сек)
     } catch (e) {
         console.error('Comment submit error:', e);
+        // В случае ошибки удаляем локальный комментарий
+        userComments[stationId] = userComments[stationId].filter(c => c !== newComment);
+        if (listEl) listEl.innerHTML = buildCommentsHtml(stationId);
         alert('Ошибка при отправке отзыва.');
     }
 }

@@ -800,6 +800,18 @@ input[type="range"] {
     padding: 6px 10px;
     border-radius: 4px;
     margin-bottom: 6px;
+    transition: all 0.3s ease;
+}
+
+@keyframes highlight-new {
+    0% { background-color: #fff8e1; transform: scale(1.02); border-left-color: #2e7d32; }
+    50% { background-color: #fffde7; transform: scale(1.01); }
+    100% { background-color: #fdfdfd; transform: scale(1); border-left-color: #2e7d32; }
+}
+
+.comment-item.new-comment {
+    animation: highlight-new 3s ease-out forwards;
+    border-left-width: 4px;
 }
 
 .comment-text {
