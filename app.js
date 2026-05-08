@@ -44,36 +44,65 @@ let destGeo = null;
 let originName = '';
 let destName = '';
 
+// Промежуточные города
+let userViaPoints = [];
+
 // Остановки пользователя
 let selectedWaypoints = [];
 
 // Пользовательские отзывы
 let userComments = {};
-let supabaseClient = null;
+let adminUsers = []; // Для поиска в админке
 let currentUser = null;
-let authMode = 'login'; // 'login', 'register', 'reset-password', or 'update-password'
-
-// Избранное
+let authMode = 'login'; // 'login', 'register'
 let favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
 
-// Функция сохранения избранного
 function saveFavorites() {
     localStorage.setItem('favStations', JSON.stringify(favoriteStations));
-    filterAndRenderStations(); // Перерисовываем карту
+    if (typeof filterAndRenderStations === 'function') filterAndRenderStations();
 }
 
-// Инициализация Supabase (если указаны ключи в config.js)
-if (CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) {
-    try {
-        // Используем глобальный объект supabase из подключенного SDK
-        supabaseClient = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-        console.log('Supabase initialized');
-    } catch (e) {
-        console.error('Failed to init Supabase:', e);
+// API Helper
+const api = {
+    async call(endpoint, method = 'GET', body = null) {
+        const url = `${CONFIG.API_URL}${endpoint}`;
+        const token = localStorage.getItem('auth_token');
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const options = {
+            method,
+            headers
+        };
+        if (body) options.body = JSON.stringify(body);
+
+        const res = await fetch(url, options);
+        if (res.status === 401) {
+            localStorage.removeItem('auth_token');
+            currentUser = null;
+            updateAuthUI();
+        }
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP error ${res.status}`);
+        }
+        return res.json();
+    }
+};
+
+
+// Ждем загрузки динамического скрипта Яндекс.Карт
+function waitForYmaps() {
+    if (typeof ymaps !== 'undefined' && ymaps.ready) {
+        ymaps.ready(init);
+    } else {
+        setTimeout(waitForYmaps, 100);
     }
 }
+waitForYmaps();
 
-ymaps.ready(init);
 
 async function init() {
     myMap = new ymaps.Map('map', {
@@ -94,9 +123,13 @@ async function init() {
     myMap.geoObjects.add(objectManager);
 
     // Сначала загружаем отзывы пользователей
-    await fetchComments();
+    try {
+        await fetchComments();
+    } catch (e) {
+        console.warn('Comments fetch failed:', e);
+    }
 
-    // Затем загружаем базу заправок (она использует отзывы при сборке балунов)
+    // Затем загружаем базу заправок
     await loadStations();
 
     // Подсказки при вводе адресов
@@ -106,251 +139,349 @@ async function init() {
 
     initBottomSheetResize();
     bindUIEvents();
-    initAuth();
 
-    // Подписка на реальное время + поллинг-фолбек
-    if (supabaseClient) {
-        subscribeToComments();
-        setInterval(fetchComments, 1000); // Поллинг каждые 20 секунд
+    try {
+        initAuth();
+    } catch (e) {
+        console.warn('Auth init failed:', e);
     }
+
+    // Подписка на реальное время (ускорена для эффекта мгновенности)
+    setInterval(fetchComments, 5000);
+
+    // Фоновое обновление базы заправок каждые 5 минут
+    setInterval(refreshStationsBackground, 300000);
+
+    // Фоновое обновление цветов меток каждые 30 секунд (ускорена для эффекта мгновенности)
+    setInterval(updateMarkerStatusAndColors, 30000);
+
 }
+
 
 // Загрузка базы станций
 async function loadStations() {
+    // 1. Проверяем кэш в localStorage
+    const CACHE_KEY = 'agnks_stations_cache';
+    const CACHE_TTL = 3600 * 1000; // 1 час
+    const cached = localStorage.getItem(CACHE_KEY);
+
+    if (cached) {
+        try {
+            const { timestamp, features } = JSON.parse(cached);
+            if (Date.now() - timestamp < CACHE_TTL && features && features.length > 0) {
+                console.log(`[Stations] Loaded ${features.length} from local cache`);
+                allFeatures = features;
+                filterAndRenderStations();
+                // Всё равно фоново обновляем через 2 сек, чтобы данные не протухали
+                setTimeout(refreshStationsBackground, 2000);
+                return;
+            }
+        } catch (e) {
+            console.warn('Cache parse error', e);
+        }
+    }
+
+    await refreshStationsBackground();
+}
+
+async function refreshStationsBackground() {
+    const startTime = performance.now();
     setStatus('Загрузка базы станций…');
 
     let gazpromData = [], allData = [];
     try {
-        // Пробуем загрузить актуальные данные через прокси
-        let resGazprom = await fetch('api/gazprom_stations').catch(() => null);
-
-        // Если прокси не ответил
-        if (!resGazprom || !resGazprom.ok) {
-            console.warn('Dynamic Gazprom API failed, falling back to static file');
-            resGazprom = await fetch(`gazprom_stations.json?t=${Date.now()}`).catch(() => null);
-        }
-
-        const resAll = await fetch('stations.json').catch(() => null);
-
-        if (resGazprom && resGazprom.ok) {
-            try { gazpromData = await resGazprom.json(); } catch (e) { }
-        }
-        if (resAll && resAll.ok) {
-            try { allData = await resAll.json(); } catch (e) { }
-        }
+        const [resGazprom, resAll] = await Promise.all([
+            fetch('/api/gazprom_stations').then(r => r.ok ? r.json() : fetch('/gazprom_stations.json').then(r => r.json())).catch(() => []),
+            fetch('/stations.json').then(r => r.ok ? r.json() : []).catch(() => [])
+        ]);
+        gazpromData = resGazprom;
+        allData = resAll;
     } catch (err) {
         console.error('Ошибка загрузки станций:', err);
     }
 
     const itemsGazprom = gazpromData && gazpromData.elements ? gazpromData.elements : (Array.isArray(gazpromData) ? gazpromData : []);
     const itemsAll = Array.isArray(allData) ? allData : [];
-    console.log(`[Stations] Loaded ${itemsGazprom.length} Gazprom, ${itemsAll.length} primary.`);
 
-    const tolerance = 0.01;
+    const newFeatures = [];
     const processedPosIds = new Set();
-    const processedNames = new Map(); // name -> [lat, lon] for fuzzy proximity
+    const processedNames = new Map();
+    const coordGrid = new Set(); // Для быстрого поиска дубликатов O(1)
 
-    function extractPosId(name) {
-        if (!name) return null;
-        const match = name.match(/POS-(\d+)/i);
-        return match ? match[1] : null;
+    function getGridKey(lat, lon) {
+        return `${Math.round(lat * 100)},${Math.round(lon * 100)}`; // Сетка ~1.1км
     }
 
-    function normalizeName(name) {
-        if (!name) return '';
-        return name.toLowerCase()
-            .replace(/^(?:р\.п\.|г\.|с\.|п\.|ст\.|дер\.)\s+/g, '')
-            .replace(/[^а-яё0-9]/g, '');
-    }
-
-    // 1. Сначала парсим заправки Газпрома (Приоритет 1)
-    itemsGazprom.forEach(function (item) {
+    // 1. Парсим Газпром (Приоритет 1)
+    itemsGazprom.forEach(item => {
         if (item.gps) {
             const parsed = parseGazpromStation(item);
             if (parsed) {
-                allFeatures.push(parsed);
+                newFeatures.push(parsed);
                 const posId = extractPosId(parsed.properties.nameClean);
                 if (posId) processedPosIds.add(posId);
                 processedNames.set(normalizeName(parsed.properties.nameClean), parsed.geometry.coordinates);
+                coordGrid.add(getGridKey(parsed.geometry.coordinates[0], parsed.geometry.coordinates[1]));
             }
         }
     });
 
-
-    // 3. Затем парсим общую базу stations.json (Приоритет 3)
-    itemsAll.forEach(function (item) {
+    // 2. Парсим OSM (Приоритет 3)
+    itemsAll.forEach(item => {
         if (item.type === 'Feature' && item.geometry && item.properties) {
             const parsed = parseStation(item);
             if (!parsed) return;
+
+            const [latNew, lonNew] = parsed.geometry.coordinates;
+            const gridKey = getGridKey(latNew, lonNew);
+
+            // Быстрая проверка на дубликаты по координатам
+            if (coordGrid.has(gridKey)) return;
 
             const name = parsed.properties.nameClean;
             const posId = extractPosId(name);
             if (posId && processedPosIds.has(posId)) return;
 
             const normName = normalizeName(name);
-            const [latNew, lonNew] = parsed.geometry.coordinates;
-
             if (processedNames.has(normName)) {
                 const [latE, lonE] = processedNames.get(normName);
                 if (Math.abs(latE - latNew) < 0.1 && Math.abs(lonE - lonNew) < 0.1) return;
             }
 
-            const isDuplicate = allFeatures.some(existing => {
-                const [latE, lonE] = existing.geometry.coordinates;
-                return Math.abs(latE - latNew) < tolerance && Math.abs(lonE - lonNew) < tolerance;
-            });
-
-            if (!isDuplicate) {
-                allFeatures.push(parsed);
-                if (posId) processedPosIds.add(posId);
-                processedNames.set(normName, [latNew, lonNew]);
-            }
+            newFeatures.push(parsed);
+            coordGrid.add(gridKey);
         }
     });
 
-    setStatus('');
-    filterAndRenderStations();
+    allFeatures = newFeatures;
 
-    // Парсинг "сырых" данных Газпрома
-    function parseGazpromStation(el) {
-        const coords = el.gps.split(',').map(s => parseFloat(s.trim()));
-        if (!coords || coords.length !== 2 || isNaN(coords[0]) || !coords[0]) return null;
-
-        // Фильтруем строящиеся/планируемые
-        const nameClean = stripHtml(el.name || 'АГНКС');
-        const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен/i;
-        const addressRaw = el.address || '';
-        const scheduleRaw = el.schedule || '';
-        if (constructionKeywords.test(nameClean) || constructionKeywords.test(addressRaw) || constructionKeywords.test(scheduleRaw)) {
-            return null;
-        }
-
-        const nameFinal = nameClean.replace(/^Временно не работает \((.+)\)$/, '$1');
-        const addressClean = stripHtml((el.address || '').replace(/^Временно не работает \((.+)\)$/, '$1'));
-        const scheduleClean = el.schedule || '';
-        const isClosed = scheduleClean === 'Временно не работает';
-
-        return {
-            type: 'Feature',
-            id: 'gazprom_' + el.id,
-            geometry: {
-                type: 'Point',
-                coordinates: coords
-            },
-            properties: {
-                nameClean: nameFinal,
-                addressClean,
-                scheduleClean,
-                isClosed,
-                closeStatus: el.close, // Сохраняем поле close ("1" - ок, "0" - закрыто)
-                clusterCaption: el.city ? `${el.city}, ${nameClean}` : nameClean,
-                hintContent: nameClean,
-                rawCoords: coords,
-                gazpromUrl: el.url,
-                amenities: {
-                    around_the_clock: !!el.around_the_clock,
-                    payment_sce: !!el.payment_sce,
-                    payment_bc: !!el.payment_bc,
-                    payment_c: !!el.payment_c,
-                    cng: !!el.cng,
-                    lng: !!el.lng,
-                    cafe: !!el.cafe,
-                    shop: !!el.shop,
-                    wc: !!el.wc,
-                    charging: !!el.charging_for_electric_cars,
-                    washing: !!el.automatic_washing,
-                    tire_inflation: !!el.tire_inflation
-                },
-                updatedAt: el.updated_at
-            }
-        };
+    // Сохраняем в кэш (с обработкой ошибок квоты)
+    try {
+        localStorage.setItem('agnks_stations_cache', JSON.stringify({
+            timestamp: Date.now(),
+            features: allFeatures
+        }));
+    } catch (e) {
+        console.warn('[Stations] Local storage quota exceeded, cache not saved');
     }
 
+    console.log(`[Stations] Processed ${allFeatures.length} stations in ${Math.round(performance.now() - startTime)}ms`);
+    setStatus('');
+    filterAndRenderStations(true); // Форсируем рендер, так как данные обновились
+}
 
-    // Нормализация данных стандартной станции
-    function parseStation(item) {
-        const nameClean = stripHtml(item.properties.hintContent || 'АГНКС');
+function extractPosId(name) {
+    if (!name) return null;
+    const match = name.match(/POS-(\d+)/i);
+    return match ? match[1] : null;
+}
 
-        // Сохраняем разрывы строк перед strip
-        const rawBody = (item.properties.balloonContentBody || '')
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/<\/p>/gi, '\n')
-            .replace(/подробнее/gi, '');
+function normalizeName(name) {
+    if (!name) return '';
+    return name.toLowerCase()
+        .replace(/^(?:р\.п\.|г\.|с\.|п\.|ст\.|дер\.)\s+/g, '')
+        .replace(/[^а-яё0-9]/g, '');
+}
 
-        const bodyClean = stripHtml(rawBody);
+// Парсинг "сырых" данных Газпрома
+function parseGazpromStation(el) {
+    const coords = el.gps.split(',').map(s => parseFloat(s.trim()));
+    if (!coords || coords.length !== 2 || isNaN(coords[0]) || !coords[0]) return null;
 
-        const lines = bodyClean.split('\n')
-            .map(s => s.replace(/^(?:адрес|режим\s*(?:работы|раб)|тел(?:ефон)?|факс|т)\s*[:.-]?\s*/iu, '').trim())
-            .filter(Boolean);
+    // Фильтруем строящиеся/планируемые
+    const nameClean = stripHtml(el.name || 'АГНКС');
+    const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен/i;
+    const addressRaw = el.address || '';
+    const scheduleRaw = el.schedule || '';
+    if (constructionKeywords.test(nameClean) || constructionKeywords.test(addressRaw) || constructionKeywords.test(scheduleRaw)) {
+        return null;
+    }
 
-        const phoneRegex = /(?:\+7|8\s*[\(\-]?\d{3}|\bтел\.?|\bт\.\s*\(|\bфакс\b|\b8\s*\(\d{3,5}\))/i;
-        const permitRegex = /по\s*пропускам|пропускной\s*режим|спецпропуск|сотрудников\s*комбината|по\s*договору|только\s*для\s*юрлиц|только\s*служебн[а-я]*/i;
-        const scheduleRegex = /\b\d{1,2}[:.][0-5]\d\b|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв|временно не работает|закрыт/iu;
+    const nameFinal = nameClean.replace(/^Временно не работает \((.+)\)$/, '$1');
+    const addressClean = stripHtml((el.address || '').replace(/^Временно не работает \((.+)\)$/, '$1'));
+    const scheduleClean = el.schedule || '';
+    const isClosed = scheduleClean === 'Временно не работает';
 
-        // Фильтруем строящиеся/планируемые (проверяем все поля)
-        const headerRaw = item.properties.balloonContentHeader || '';
-        const hintRaw = item.properties.hintContent || '';
-        const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен/i;
-
-        if (constructionKeywords.test(hintRaw) || constructionKeywords.test(headerRaw) || constructionKeywords.test(rawBody)) {
-            return null;
+    return {
+        type: 'Feature',
+        id: 'gazprom_' + el.id,
+        geometry: {
+            type: 'Point',
+            coordinates: coords
+        },
+        properties: {
+            nameClean: nameFinal,
+            addressClean,
+            scheduleClean,
+            isClosed,
+            closeStatus: el.close, // Сохраняем поле close ("1" - ок, "0" - закрыто)
+            clusterCaption: el.city ? `${el.city}, ${nameClean}` : nameClean,
+            hintContent: nameClean,
+            rawCoords: coords,
+            gazpromUrl: el.url,
+            amenities: {
+                around_the_clock: !!el.around_the_clock,
+                payment_sce: !!el.payment_sce,
+                payment_bc: !!el.payment_bc,
+                payment_c: !!el.payment_c,
+                cng: !!el.cng,
+                lng: !!el.lng,
+                cafe: !!el.cafe,
+                shop: !!el.shop,
+                wc: !!el.wc,
+                charging: !!el.charging_for_electric_cars,
+                washing: !!el.automatic_washing,
+                tire_inflation: !!el.tire_inflation
+            },
+            updatedAt: el.updated_at
         }
+    };
+}
 
-        const addressLines = [], scheduleLines = [], phoneLines = [];
 
-        for (const line of lines) {
-            if (permitRegex.test(line)) {
-                // Если в строке с пропуском есть еще и часы работы, попробуем разделить
-                if (scheduleRegex.test(line) && line.includes('.')) {
-                    const parts = line.split(/[\.]\s+/);
-                    parts.forEach(p => {
-                        if (permitRegex.test(p)) addressLines.push(p);
-                        else if (scheduleRegex.test(p)) scheduleLines.push(p);
-                        else addressLines.push(p);
-                    });
-                } else {
-                    addressLines.push(line);
-                }
-            } else if (phoneRegex.test(line)) {
-                phoneLines.push(line);
-            } else if (scheduleRegex.test(line)) {
-                scheduleLines.push(line);
+// Нормализация данных стандартной станции
+function parseStation(item) {
+    let nameRaw = item.properties.hintContent || item.properties.balloonContentHeader || 'АГНКС';
+    let nameClean = stripHtml(nameRaw);
+
+    // Если имя слишком короткое или стандартное, пробуем взять заголовок балуна
+    if (nameClean === 'АГНКС' && item.properties.balloonContentHeader) {
+        nameClean = stripHtml(item.properties.balloonContentHeader);
+    }
+
+    // Сохраняем разрывы строк перед strip
+    const rawBody = (item.properties.balloonContentBody || '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/подробнее/gi, '');
+
+    const bodyClean = stripHtml(rawBody);
+
+    const lines = bodyClean.split('\n')
+        .map(s => s.replace(/^(?:адрес|режим\s*(?:работы|раб)|тел(?:ефон)?|факс|т)\s*[:.-]?\s*/iu, '').trim())
+        .filter(Boolean);
+
+    const phoneRegex = /(?:\+7|8\s*[\(\-]?\d{3}|\bтел\.?|\bт\.\s*\(|\bфакс\b|\b8\s*\(\d{3,5}\))/i;
+    const permitRegex = /по\s*пропускам|пропускной\s*режим|спецпропуск|сотрудников\s*комбината|по\s*договору|только\s*для\s*юрлиц|только\s*служебн[а-я]*/i;
+    const scheduleRegex = /\b\d{1,2}[:.][0-5]\d\b|\d{1,2}ч\d{2}м|ежедневн|будни|круглосуточно|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(пн|вт|ср|чт|пт|сб|вс|будни|выходн)(?=[^а-яёА-ЯЁa-zA-Z0-9]|$)|(?<=[^а-яёА-ЯЁa-zA-Z0-9]|^)(?:с|до)\s+\d{1,2}|суббот|воскрес|выходн|перерыв|режим работы|режим раб|принима|без перерыв|временно не работает|закрыт/iu;
+
+    // Фильтруем строящиеся/планируемые (проверяем все поля)
+    const headerRaw = item.properties.balloonContentHeader || '';
+    const hintRaw = item.properties.hintContent || '';
+    const constructionKeywords = /строит|стройк|планир|проектир|подготов|не\s*введен/i;
+
+    if (constructionKeywords.test(hintRaw) || constructionKeywords.test(headerRaw) || constructionKeywords.test(rawBody)) {
+        return null;
+    }
+
+    const addressLines = [], scheduleLines = [], phoneLines = [];
+
+    for (const line of lines) {
+        if (permitRegex.test(line)) {
+            // Если в строке с пропуском есть еще и часы работы, попробуем разделить
+            if (scheduleRegex.test(line) && line.includes('.')) {
+                const parts = line.split(/[\.]\s+/);
+                parts.forEach(p => {
+                    if (permitRegex.test(p)) addressLines.push(p);
+                    else if (scheduleRegex.test(p)) scheduleLines.push(p);
+                    else addressLines.push(p);
+                });
             } else {
                 addressLines.push(line);
             }
+        } else if (phoneRegex.test(line)) {
+            phoneLines.push(line);
+        } else if (scheduleRegex.test(line)) {
+            scheduleLines.push(line);
+        } else {
+            addressLines.push(line);
         }
+    }
 
-        return {
-            type: 'Feature',
-            id: 'main_' + item.id,
-            geometry: {
-                type: 'Point',
-                coordinates: item.geometry.coordinates
+    return {
+        type: 'Feature',
+        id: 'main_' + item.id,
+        geometry: {
+            type: 'Point',
+            coordinates: (item.geometry.coordinates[0] > 100 || item.geometry.coordinates[1] < 20)
+                ? [item.geometry.coordinates[1], item.geometry.coordinates[0]]
+                : item.geometry.coordinates
+        },
+        properties: {
+            nameClean,
+            addressClean: addressLines.join(', '),
+            scheduleClean: scheduleLines.join('; ') || null,
+            phoneClean: phoneLines.join('; ') || null,
+            amenities: {
+                around_the_clock: /круглосуточно|24\/7/i.test(scheduleLines.join('; ')),
+                cng: true // Все заправки из этого файла — метановые
             },
-            properties: {
-                nameClean,
-                addressClean: addressLines.join(', '),
-                scheduleClean: scheduleLines.join('; ') || null,
-                phoneClean: phoneLines.join('; ') || null,
-                amenities: {
-                    around_the_clock: /круглосуточно|24\/7/i.test(scheduleLines.join('; ')),
-                    cng: true // Все заправки из этого файла — метановые
-                },
-                clusterCaption: item.properties.clusterCaption,
-                hintContent: nameClean,
-                rawCoords: item.geometry.coordinates
-            }
-        };
+            clusterCaption: item.properties.clusterCaption,
+            hintContent: nameClean,
+            rawCoords: item.geometry.coordinates
+        }
+    };
+}
+
+function stripHtml(html) {
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    return div.textContent || div.innerText || '';
+}
+
+
+/** Проверка, находится ли объект геокодирования в России */
+function isInsideRussia(geoObj) {
+    if (!geoObj) return false;
+
+    // Пытаемся извлечь метаданные разными способами
+    const props = geoObj.properties;
+    const meta = props ? props.get('metaDataProperty.GeocoderMetaData') : null;
+
+    if (!meta || !meta.Address) {
+        console.warn('isInsideRussia: No metadata or address found', geoObj);
+        return true; // Если данных нет, разрешаем (чтобы не блокировать всё подряд), но это не должно случаться
     }
 
-    function stripHtml(html) {
-        const div = document.createElement('div');
-        div.innerHTML = html;
-        return div.textContent || div.innerText || '';
+    const address = meta.Address;
+
+    // 1. Проверяем CountryCode (обычно 'RU')
+    const countryCode = address.CountryCode;
+    if (countryCode === 'RU') return true;
+    if (countryCode && countryCode !== 'RU') {
+        console.log(`isInsideRussia: Rejected by CountryCode: ${countryCode}`);
+        return false;
     }
+
+    // 2. Проверяем CountryNameCode (может быть в Country)
+    const countryNameCode = address.Country ? address.Country.CountryNameCode : null;
+    if (countryNameCode === 'RU') return true;
+    if (countryNameCode && countryNameCode !== 'RU') {
+        console.log(`isInsideRussia: Rejected by CountryNameCode: ${countryNameCode}`);
+        return false;
+    }
+
+    // 3. Проверяем компоненты адреса
+    const components = address.Components || [];
+    const countryComponent = components.find(c => c.kind === 'country');
+    if (countryComponent) {
+        const name = countryComponent.name;
+        if (name === 'Россия' || name === 'Russian Federation') return true;
+        console.log(`isInsideRussia: Rejected by country component name: ${name}`);
+        return false;
+    }
+
+    // 4. Проверяем полное название страны
+    const countryName = address.Country ? address.Country.CountryName : '';
+    if (countryName === 'Россия' || countryName === 'Russian Federation') return true;
+
+    // Если мы здесь, значит страна не Россия
+    console.log('isInsideRussia: Could not verify Russia as country', address);
+    return false;
 }
 
 function bindUIEvents() {
+
     const showAllCheckbox = document.getElementById('show-all');
     const distanceSlider = document.getElementById('distance-slider');
     const distanceValLabel = document.getElementById('distance-val');
@@ -383,31 +514,84 @@ function bindUIEvents() {
     document.getElementById('my-loc-from').addEventListener('click', () => useMyLocation('route-from'));
     document.getElementById('my-loc-to').addEventListener('click', () => useMyLocation('route-to'));
 
-    // Кнопка смены мест А и Б
-    document.getElementById('swap-locations').addEventListener('click', () => {
-        const fromInput = document.getElementById('route-from');
-        const toInput = document.getElementById('route-to');
+    // Добавление промежуточных точек и обновление коннекторов
+    let viaPointCount = 0;
 
-        // Меняем текст в инпутах
-        const tempVal = fromInput.value;
-        fromInput.value = toInput.value;
-        toInput.value = tempVal;
+    function renderConnectors() {
+        document.querySelectorAll('.route-connector-row').forEach(el => el.remove());
 
-        // Меняем глобальные переменные координат
-        const tempGeo = originGeo;
-        originGeo = destGeo;
-        destGeo = tempGeo;
+        const originWrapper = document.getElementById('origin-wrapper');
+        const destWrapper = document.getElementById('dest-wrapper');
+        const viaContainer = document.getElementById('via-points-container');
 
-        // Меняем сохраненные названия
-        const tempName = originName;
-        originName = destName;
-        destName = tempName;
+        const createConnector = (topEl, bottomEl, insertIndex) => {
+            const row = document.createElement('div');
+            row.className = 'route-connector-row';
+            row.innerHTML = `
+                <button type="button" class="connector-swap-btn" title="Поменять местами">⇅</button>
+                <button type="button" class="connector-add-btn" title="Добавить промежуточный город">➕</button>
+            `;
 
-        // Если оба пункта заданы — перестраиваем маршрут
-        if (originGeo && destGeo) {
-            buildRoute(originGeo, destGeo);
+            row.querySelector('.connector-swap-btn').addEventListener('click', () => {
+                const topInput = topEl.querySelector('input[type="text"]');
+                const bottomInput = bottomEl.querySelector('input[type="text"]');
+
+                const tempVal = topInput.value;
+                topInput.value = bottomInput.value;
+                bottomInput.value = tempVal;
+            });
+
+            row.querySelector('.connector-add-btn').addEventListener('click', () => {
+                viaPointCount++;
+                const wrapper = document.createElement('div');
+                wrapper.className = 'via-point-group';
+                wrapper.style.display = 'flex';
+                wrapper.style.gap = '8px';
+                wrapper.style.alignItems = 'stretch';
+                wrapper.style.width = '100%';
+                wrapper.style.marginBottom = '12px';
+                wrapper.style.position = 'relative';
+
+                wrapper.innerHTML = `
+                    <input type="text" id="route-via-${viaPointCount}" class="via-point-input" placeholder="Через (промежуточная точка)" style="width: 100%; flex-grow: 1; min-width: 0; margin-bottom: 0;">
+                    <button type="button" class="remove-via-btn" title="Удалить точку" style="margin-bottom: 0;">✖</button>
+                `;
+
+                const currentVias = viaContainer.querySelectorAll('.via-point-group');
+                if (insertIndex < currentVias.length) {
+                    viaContainer.insertBefore(wrapper, currentVias[insertIndex]);
+                } else {
+                    viaContainer.appendChild(wrapper);
+                }
+
+                initCustomSuggest(`route-via-${viaPointCount}`);
+
+                wrapper.querySelector('.remove-via-btn').addEventListener('click', () => {
+                    viaContainer.removeChild(wrapper);
+                    renderConnectors();
+                });
+
+                renderConnectors();
+            });
+
+            return row;
+        };
+
+        const viaGroups = Array.from(viaContainer.children);
+
+        // 1. Between origin and first via/dest
+        const firstConnector = createConnector(originWrapper, viaGroups.length ? viaGroups[0] : destWrapper, 0);
+        originWrapper.parentNode.insertBefore(firstConnector, originWrapper.nextSibling);
+
+        // 2. Between vias, and between last via and dest
+        for (let i = 0; i < viaGroups.length; i++) {
+            const nextEl = i === viaGroups.length - 1 ? destWrapper : viaGroups[i + 1];
+            const conn = createConnector(viaGroups[i], nextEl, i + 1);
+            viaGroups[i].parentNode.insertBefore(conn, viaGroups[i].nextSibling);
         }
-    });
+    }
+
+    renderConnectors();
 
     // Фильтр по удобствам — кнопка раскрытия
     document.getElementById('amenity-toggle').addEventListener('click', function () {
@@ -439,6 +623,14 @@ function bindUIEvents() {
         // Клик по кнопке — показать окно
         guideBtn.addEventListener('click', () => {
             guideModal.style.display = 'flex';
+
+            // Ленивая загрузка видео
+            const video = document.getElementById('guide-video');
+            if (video && !video.src) {
+                video.src = video.getAttribute('data-src');
+                video.load();
+            }
+
             if (guideList && guideList.children.length === 0) {
                 loadGuide();
             }
@@ -544,33 +736,32 @@ function bindUIEvents() {
 
             try {
                 if (authMode === 'login') {
-                    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                    if (error) throw error;
-                } else if (authMode === 'register') {
-                    const { error } = await supabaseClient.auth.signUp({ email, password });
-                    if (error) throw error;
-                    alert('Регистрация успешна!');
-                } else if (authMode === 'reset-password') {
-                    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-                        redirectTo: window.location.origin + window.location.pathname
-                    });
-                    if (error) throw error;
-                    successEl.innerText = 'Письмо для сброса пароля отправлено!';
-                    successEl.style.display = 'block';
-                    authForm.style.display = 'none';
-                } else if (authMode === 'update-password') {
-                    const { error } = await supabaseClient.auth.updateUser({ password });
-                    if (error) throw error;
-                    alert('Пароль успешно обновлен!');
-                    authMode = 'login';
+                    const data = await api.call('/api/auth/login', 'POST', { email, password });
+                    localStorage.setItem('auth_token', data.token);
+                    currentUser = data.user;
+                    updateAuthUI();
                     closeAuthModal();
+                    await syncLocalFavorites();
+                    await fetchFavorites();
+                    await fetchSavedRoutes();
+                    filterAndRenderStations();
+
+                } else if (authMode === 'register') {
+                    await api.call('/api/auth/register', 'POST', { email, password });
+                    alert('Регистрация успешна! Теперь вы можете войти.');
+                    authMode = 'login';
+                    updateAuthModalLabels();
                 }
             } catch (err) {
                 errorEl.innerText = translateAuthError(err.message);
                 errorEl.style.display = 'block';
             } finally {
                 submitBtn.disabled = false;
-                submitBtn.innerText = originalText;
+                // Вместо восстановления старого текста, обновляем его согласно текущему режиму
+                if (authMode === 'login') submitBtn.innerText = 'Войти';
+                else if (authMode === 'register') submitBtn.innerText = 'Создать аккаунт';
+                else if (authMode === 'reset-password') submitBtn.innerText = 'Отправить письмо';
+                else if (authMode === 'update-password') submitBtn.innerText = 'Сохранить';
             }
         });
     }
@@ -632,69 +823,29 @@ async function onSaveRouteSubmit(e) {
 
 // === Auth Functions ===
 async function initAuth() {
-    if (!supabaseClient) return;
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
 
-    supabaseClient.auth.onAuthStateChange(async (event, session) => {
-        currentUser = session?.user || null;
+    try {
+        const data = await api.call('/api/auth/me');
+        currentUser = data.user;
         updateAuthUI();
-
-        console.log('Auth event:', event, 'authMode:', authMode, 'isRecoveryFlow:', isRecoveryFlow);
-
-        if (event === 'SIGNED_IN') {
-            // Если мы в процессе восстановления пароля — НЕ закрываем окно!
-            if (authMode === 'update-password' || isRecoveryFlow) {
-                authMode = 'update-password';
-                updateAuthModalLabels();
-            } else {
-                closeAuthModal();
-            }
-            // Синхронизируем избранное при входе
-            await syncLocalFavorites();
-            await fetchFavorites();
-        } else if (event === 'SIGNED_OUT') {
-            favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
-            filterAndRenderStations();
-        } else if (event === 'PASSWORD_RECOVERY') {
-            openAuthModal('update-password');
-        }
-    });
-
-    // Если в URL были признаки восстановления — принудительно открываем форму
-    if (isRecoveryFlow) {
-        console.log('Forcing open update-password modal');
-        openAuthModal('update-password');
-    }
-
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    currentUser = session?.user || null;
-    updateAuthUI();
-
-    if (supabaseClient) {
-        await fetchComments();
-        subscribeToComments(); // Подписка на новые отзывы
-    }
-
-    if (currentUser) {
         await fetchFavorites();
-        await fetchSavedRoutes(); // Добавлено
+        await fetchSavedRoutes();
+    } catch (err) {
+        console.warn('Auth check failed:', err);
+        localStorage.removeItem('auth_token');
     }
+
+    await fetchComments();
 }
 
 async function fetchFavorites() {
-    if (!supabaseClient || !currentUser) return;
+    if (!currentUser) return;
     try {
-        const { data, error } = await supabaseClient
-            .from('favorites')
-            .select('station_id')
-            .eq('user_id', currentUser.id);
-
-        if (error) throw error;
-
-        // Объединяем с локальными или заменяем? Обычно лучше объединить
-        const remoteIds = data.map(item => item.station_id);
+        const data = await api.call('/api/favorites');
+        const remoteIds = data;
         const localIds = JSON.parse(localStorage.getItem('favStations') || '[]');
-
-        // Уникальный набор
         const combined = new Set([...localIds, ...remoteIds]);
         favoriteStations = Array.from(combined);
         saveFavorites();
@@ -704,50 +855,37 @@ async function fetchFavorites() {
 }
 
 async function syncLocalFavorites() {
-    if (!supabaseClient || !currentUser) return;
+    if (!currentUser) return;
     const localIds = JSON.parse(localStorage.getItem('favStations') || '[]');
     if (localIds.length === 0) return;
 
     try {
-        const toInsert = localIds.map(id => ({
-            user_id: currentUser.id,
-            station_id: id
-        }));
-
-        // Используем upsert чтобы избежать ошибок дубликатов
-        const { error } = await supabaseClient
-            .from('favorites')
-            .upsert(toInsert, { onConflict: 'user_id,station_id' });
-
-        if (error) throw error;
+        for (const id of localIds) {
+            await api.call('/api/favorites', 'POST', { station_id: id, action: 'add' });
+        }
     } catch (err) {
         console.error('Error syncing local favorites:', err);
     }
 }
 
-async function syncFavoriteToSupabase(stId) {
-    if (!supabaseClient || !currentUser) return;
+async function syncFavoriteToBackend(stId) {
+    if (!currentUser) return;
     try {
-        await supabaseClient
-            .from('favorites')
-            .upsert({ user_id: currentUser.id, station_id: stId }, { onConflict: 'user_id,station_id' });
+        await api.call('/api/favorites', 'POST', { station_id: stId, action: 'add' });
     } catch (err) {
-        console.error('Error adding favorite to Supabase:', err);
+        console.error('Error adding favorite to backend:', err);
     }
 }
 
-async function removeFavoriteFromSupabase(stId) {
-    if (!supabaseClient || !currentUser) return;
+async function removeFavoriteFromBackend(stId) {
+    if (!currentUser) return;
     try {
-        await supabaseClient
-            .from('favorites')
-            .delete()
-            .eq('user_id', currentUser.id)
-            .eq('station_id', stId);
+        await api.call('/api/favorites', 'POST', { station_id: stId, action: 'remove' });
     } catch (err) {
-        console.error('Error removing favorite from Supabase:', err);
+        console.error('Error removing favorite from backend:', err);
     }
 }
+
 
 function updateAuthUI() {
     const authBtn = document.getElementById('auth-btn');
@@ -767,7 +905,13 @@ function updateAuthUI() {
     if (myRoutesBtn) {
         myRoutesBtn.style.display = currentUser ? 'flex' : 'none';
     }
+
+    const adminBtn = document.getElementById('admin-btn');
+    if (adminBtn) {
+        adminBtn.style.display = (currentUser && currentUser.is_admin) ? 'flex' : 'none';
+    }
 }
+
 
 function openAuthModal(mode = 'login') {
     authMode = mode;
@@ -786,16 +930,29 @@ function closeAuthModal() {
 function translateAuthError(msg) {
     if (!msg) return 'Неизвестная ошибка';
     const lower = msg.toLowerCase();
-    if (lower.includes('invalid login credentials')) return 'Неверный email или пароль';
-    if (lower.includes('user already registered')) return 'Пользователь с таким email уже зарегистрирован.';
-    if (lower.includes('password should be at least 6 characters')) return 'Пароль должен быть не менее 6 символов.';
-    if (lower.includes('signup disabled')) return 'Регистрация временно отключена.';
-    if (lower.includes('email link is invalid or has expired')) return 'Ссылка недействительна или срок её действия истек.';
-    if (lower.includes('rate limit exceeded')) return 'Слишком много попыток. Пожалуйста, подождите немного (обычно 1 час).';
-    if (lower.includes('network error') || lower.includes('failed to fetch')) return 'Ошибка сети. Проверьте соединение с интернетом.';
+
+    if (lower.includes('invalid login credentials') || lower.includes('invalid credentials')) {
+        return 'Неверный email или пароль';
+    }
+    if (lower.includes('user already registered') || lower.includes('user already exists')) {
+        return 'Пользователь с таким email уже зарегистрирован.';
+    }
+    if (lower.includes('password should be at least 6 characters')) {
+        return 'Пароль должен быть не менее 6 символов.';
+    }
+    if (lower.includes('missing email or password')) {
+        return 'Введите email и пароль.';
+    }
+    if (lower.includes('network error') || lower.includes('failed to fetch')) {
+        return 'Ошибка сети. Проверьте соединение с интернетом.';
+    }
+    if (lower.includes('unauthorized')) {
+        return 'Сессия истекла. Пожалуйста, войдите снова.';
+    }
 
     return msg;
 }
+
 
 function toggleAuthMode() {
     authMode = (authMode === 'login' ? 'register' : 'login');
@@ -854,10 +1011,13 @@ function updateAuthModalLabels() {
 }
 
 async function logout() {
-    if (supabaseClient) {
-        await supabaseClient.auth.signOut();
-    }
+    localStorage.removeItem('auth_token');
+    currentUser = null;
+    favoriteStations = JSON.parse(localStorage.getItem('favStations') || '[]');
+    updateAuthUI();
+    filterAndRenderStations();
 }
+
 
 // Возвращает список выбранных фильтров по удобствам
 function getSelectedAmenities() {
@@ -877,11 +1037,11 @@ function onBuildRouteClick() {
         return;
     }
 
-    // Если пользователь нажал проложить маршрут, а заполнено только поле Откуда — 
-    // возможно он просто хочет найти этот город, если поле Куда пустое.
-    // Но мы добавили отдельный поиск, так что просто просим оба поля.
+    const viaInputs = Array.from(document.querySelectorAll('.via-point-input'))
+        .map(input => input.value.trim())
+        .filter(val => val !== '');
 
-    onBuildRoute(fromInput, toInput);
+    onBuildRoute(fromInput, toInput, viaInputs);
 }
 
 /** Поиск и переход к городу */
@@ -898,6 +1058,12 @@ async function onCitySearchClick() {
         const res = await ymaps.geocode(query, { results: 1 });
         const obj = res.geoObjects.get(0);
         if (obj) {
+            if (!isInsideRussia(obj)) {
+                const country = obj.getCountry() || 'Вне РФ';
+                setStatus(`Мы работаем только в РФ (обнаружена локация: ${country})`);
+                alert(`Мы работаем только в РФ (обнаружена локация: ${country})`);
+                return;
+            }
             const coords = obj.geometry.getCoordinates();
             myMap.setCenter(coords, 10);
             setStatus(`Карта центрирована на: ${query}`);
@@ -913,27 +1079,55 @@ async function onCitySearchClick() {
     }
 }
 
-
-
-function onBuildRoute(fromInput, toInput) {
+function onBuildRoute(fromInput, toInput, viaInputs = []) {
     setStatus('Геокодирование адресов...');
 
-    Promise.all([
+    const geocodePromises = [
         ymaps.geocode(fromInput),
+        ...viaInputs.map(v => ymaps.geocode(v)),
         ymaps.geocode(toInput)
-    ]).then(function (results) {
+    ];
+
+    Promise.all(geocodePromises).then(function (results) {
         const fromGeoObj = results[0].geoObjects.get(0);
-        const toGeoObj = results[1].geoObjects.get(0);
+        const toGeoObj = results[results.length - 1].geoObjects.get(0);
 
         if (!fromGeoObj || !toGeoObj) {
             setStatus('Город не найден. Проверьте написание.');
             return;
         }
 
+        // Проверка всех точек маршрута на нахождение в РФ
+        for (let i = 0; i < results.length; i++) {
+            const res = results[i];
+            const obj = (res.geoObjects && typeof res.geoObjects.get === 'function') ? res.geoObjects.get(0) : (typeof res.get === 'function' ? res.get(0) : null);
+
+            if (obj && !isInsideRussia(obj)) {
+                const country = (typeof obj.getCountry === 'function' ? obj.getCountry() : null) || 'Вне РФ';
+                console.log('Blocking route point outside Russia:', country, obj);
+                setStatus(`Мы работаем только в РФ (точка: ${country})`);
+                alert(`Мы работаем только в РФ (обнаружена точка: ${country}). Пожалуйста, используйте только города РФ.`);
+                return;
+            }
+        }
+
         originGeo = fromGeoObj.geometry.getCoordinates(); // [lat, lon]
         destGeo = toGeoObj.geometry.getCoordinates();
         originName = fromInput;
         destName = toInput;
+
+        userViaPoints = [];
+        for (let i = 0; i < viaInputs.length; i++) {
+            const viaObj = results[i + 1].geoObjects.get(0);
+            if (viaObj) {
+                const coords = viaObj.geometry.getCoordinates();
+                userViaPoints.push({
+                    lat: coords[0],
+                    lon: coords[1],
+                    name: viaInputs[i]
+                });
+            }
+        }
 
         // Сбрасываем предыдущие заезды при новом маршруте
         selectedWaypoints = [];
@@ -966,9 +1160,17 @@ function onBuildRouteFuelClick() {
         return;
     }
 
+    const viaInputs = Array.from(document.querySelectorAll('.via-point-input'))
+        .map(input => input.value.trim())
+        .filter(val => val !== '');
+
     needsFuelPlanning = true;
-    onBuildRoute(fromInput, toInput);
+    onBuildRoute(fromInput, toInput, viaInputs);
 }
+
+// Глобальные переменные для кэширования расчета кандидатов
+let cachedCandidates = null;
+let cachedRouteKey = null;
 
 async function planFuelRoute() {
     if (!routeGeoJsonCoords || routeGeoJsonCoords.length < 2) {
@@ -976,6 +1178,7 @@ async function planFuelRoute() {
         return;
     }
 
+    const startTime = performance.now();
     const consumption = parseFloat(document.getElementById('fuel-consumption').value) || 10;
     const tankVolume = parseFloat(document.getElementById('fuel-tank').value) || 20;
     const initialPercent = parseFloat(document.getElementById('fuel-initial').value) || 50;
@@ -999,33 +1202,56 @@ async function planFuelRoute() {
     const baseLine = turf.lineString(routeGeoJsonCoords);
     const totalDistKm = turf.length(baseLine, { units: 'kilometers' });
 
-    // 1. Собираем всех кандидатов в радиусе 15км от трассы
-    const allCngStations = allFeatures.filter(f => {
-        const props = f.properties;
-        return (props.amenities && props.amenities.cng) || (props.categories && props.categories.cng);
-    });
+    // Проверяем кэш кандидатов (если маршрут тот же, не пересчитываем проекции)
+    const currentRouteKey = `${routeGeoJsonCoords.length}_${routeGeoJsonCoords[0][0]}_${routeGeoJsonCoords[routeGeoJsonCoords.length - 1][0]}`;
+    let candidates = [];
 
-    const candidates = [];
-    allCngStations.forEach(st => {
-        const [stLat, stLon] = st.geometry.coordinates;
-        const stPoint = turf.point([stLon, stLat]);
+    if (cachedRouteKey === currentRouteKey && cachedCandidates) {
+        candidates = cachedCandidates;
+        console.log(`[Planning] Using ${candidates.length} cached candidates`);
+    } else {
+        // 1. Упрощаем линию для ускорения расчетов расстояний
+        const simplifiedLine = turf.simplify(baseLine, { tolerance: 0.001, highQuality: false });
 
-        // Расстояние от заправки до всей линии маршрута
-        const distToLine = turf.pointToLineDistance(stPoint, baseLine, { units: 'kilometers' });
-        if (distToLine < 15) {
-            // Проецируем точку на линию, чтобы узнать расстояние от начала маршрута
-            const snapped = turf.nearestPointOnLine(baseLine, stPoint, { units: 'kilometers' });
-            candidates.push({
-                st,
-                dist: snapped.properties.location, // Дистанция от старта в км
-                coords: [stLat, stLon]
-            });
-        }
-    });
+        // 2. Рассчитываем Bounding Box с запасом ~20км
+        const baseBbox = turf.bbox(baseLine);
+        const pad = 0.2;
+        const bbox = [baseBbox[0] - pad, baseBbox[1] - pad, baseBbox[2] + pad, baseBbox[3] + pad];
 
-    // Сортируем кандидатов по дистанции от начала
-    candidates.sort((a, b) => a.dist - b.dist);
-    console.log(`Found ${candidates.length} candidate stations near route.`);
+        // 3. Собираем всех кандидатов
+        const allCngStations = allFeatures.filter(f => {
+            const props = f.properties;
+            return (props.amenities && props.amenities.cng) || (props.categories && props.categories.cng);
+        });
+
+        allCngStations.forEach(st => {
+            const [stLat, stLon] = st.geometry.coordinates;
+
+            // Быстрый фильтр по BBox (O(1))
+            if (stLon < bbox[0] || stLon > bbox[2] || stLat < bbox[1] || stLat > bbox[3]) return;
+
+            const stPoint = turf.point([stLon, stLat]);
+            // Расстояние до упрощенной линии
+            const distToLine = turf.pointToLineDistance(stPoint, simplifiedLine, { units: 'kilometers' });
+
+            if (distToLine < 15) {
+                // Проецируем на ОРИГИНАЛЬНУЮ линию для точности дистанции
+                const snapped = turf.nearestPointOnLine(baseLine, stPoint, { units: 'kilometers' });
+                candidates.push({
+                    st,
+                    dist: snapped.properties.location,
+                    coords: [stLat, stLon],
+                    routeCoords: snapped.geometry.coordinates // [lon, lat]
+                });
+            }
+        });
+
+        // Сортируем и кэшируем
+        candidates.sort((a, b) => a.dist - b.dist);
+        cachedCandidates = candidates;
+        cachedRouteKey = currentRouteKey;
+        console.log(`[Planning] Found ${candidates.length} candidates in ${Math.round(performance.now() - startTime)}ms`);
+    }
 
     const stopsToAdd = [];
     let d = 0;
@@ -1051,15 +1277,19 @@ async function planFuelRoute() {
             console.warn(`Insufficient infrastructure at ${lastStopDist.toFixed(1)} km. Gap exceeds budget ${budget.toFixed(1)} km.`);
             alert(`ВНИМАНИЕ: Маршрут не рекомендуется. Между станциями слишком большой разрыв в районе ${(lastStopDist + budget).toFixed(0)} км.`);
             setStatus('Маршрут не рекомендуется (разрыв)');
+            stopsToAdd.length = 0; // Очищаем список заправок, если маршрут не рекомендуется
             break;
         }
+
 
         // Добавляем остановку
         stopsToAdd.push({
             id: String(bestCandidate.st.id),
             name: bestCandidate.st.properties.nameClean,
             lat: bestCandidate.coords[0],
-            lon: bestCandidate.coords[1]
+            lon: bestCandidate.coords[1],
+            routeLat: bestCandidate.routeCoords ? bestCandidate.routeCoords[1] : bestCandidate.coords[0],
+            routeLon: bestCandidate.routeCoords ? bestCandidate.routeCoords[0] : bestCandidate.coords[1]
         });
 
         lastStopDist = bestCandidate.dist;
@@ -1091,6 +1321,7 @@ function resetRoute() {
     destGeo = null;
     originName = '';
     destName = '';
+    userViaPoints = [];
     selectedWaypoints = [];
     routeGeoJsonCoords = null;
     baseRouteGeoJsonCoords = null;
@@ -1102,12 +1333,20 @@ function resetRoute() {
 
     document.getElementById('route-from').value = '';
     document.getElementById('route-to').value = '';
+
+    const viaContainer = document.getElementById('via-points-container');
+    if (viaContainer) {
+        viaContainer.innerHTML = ''; // Очищаем все добавленные точки
+    }
+
     document.getElementById('status').innerText = '';
     document.getElementById('reset-route').style.display = 'none';
     document.getElementById('save-route-btn').style.display = 'none'; // Скрываем и эту кнопку
 
+    objectManager.objects.balloon.close();
     updateRouteSidebar();
     filterAndRenderStations();
+
 }
 
 // Построение маршрута
@@ -1116,9 +1355,30 @@ function requestRouteAndRedraw() {
 
     setStatus('Прокладываю маршрут…');
 
+    let allStops = [];
+    userViaPoints.forEach((v, idx) => allStops.push({ type: 'via', lat: v.lat, lon: v.lon, name: v.name, originalIndex: idx }));
+    selectedWaypoints.forEach((w, index) => allStops.push({ type: 'gas', lat: w.lat, lon: w.lon, name: w.name, gasIndex: index }));
+
+    // Если есть базовый маршрут, отсортируем все остановки по расстоянию вдоль него
+    if (baseRouteGeoJsonCoords) {
+        const tempBaseLine = turf.lineString(baseRouteGeoJsonCoords);
+        allStops.sort((a, b) => {
+            // Если оба пункта — города, сохраняем их исходный порядок
+            if (a.type === 'via' && b.type === 'via') {
+                return a.originalIndex - b.originalIndex;
+            }
+            const locA = turf.nearestPointOnLine(tempBaseLine, turf.point([a.lon, a.lat])).properties.location || 0;
+            const locB = turf.nearestPointOnLine(tempBaseLine, turf.point([b.lon, b.lat])).properties.location || 0;
+            return locA - locB;
+        });
+    }
+
     const routePoints = [
         originGeo,
-        ...selectedWaypoints.map(wp => ({ type: 'wayPoint', point: [wp.lat, wp.lon] })),
+        ...allStops.map(s => ({ 
+            type: 'viaPoint', 
+            point: [s.routeLat || s.lat, s.routeLon || s.lon] 
+        })),
         destGeo
     ];
 
@@ -1178,7 +1438,11 @@ function requestRouteAndRedraw() {
 
     }, function (error) {
         console.error('Яндекс маршруты:', error);
-        setStatus('Ошибка маршрутизации (возможно нет API-ключа Яндекса): ' + error.message);
+        let msg = error.message;
+        if (msg === "can't construct a route") {
+            msg = "Не удалось проложить путь. Возможно, одна из точек недоступна для проезда или маршрут слишком сложный.";
+        }
+        setStatus('Ошибка маршрутизации: ' + msg);
     });
 }
 
@@ -1195,25 +1459,47 @@ function updateRouteSidebar() {
 
     container.style.display = 'block';
 
+    let allStops = [];
+    userViaPoints.forEach((v, idx) => allStops.push({ type: 'via', lat: v.lat, lon: v.lon, name: v.name, originalIndex: idx }));
+    selectedWaypoints.forEach((w, index) => allStops.push({ type: 'gas', lat: w.lat, lon: w.lon, name: w.name, gasIndex: index }));
+
+    if (baseRouteGeoJsonCoords) {
+        const tempBaseLine = turf.lineString(baseRouteGeoJsonCoords);
+        allStops.sort((a, b) => {
+            if (a.type === 'via' && b.type === 'via') {
+                return a.originalIndex - b.originalIndex;
+            }
+            const locA = turf.nearestPointOnLine(tempBaseLine, turf.point([a.lon, a.lat])).properties.location || 0;
+            const locB = turf.nearestPointOnLine(tempBaseLine, turf.point([b.lon, b.lat])).properties.location || 0;
+            return locA - locB;
+        });
+    }
+
     // Показываем/скрываем заголовок "Заезды по пути"
     const titleEl = document.getElementById('waypoints-title');
     if (titleEl) {
-        titleEl.style.display = selectedWaypoints.length > 0 ? 'block' : 'none';
+        titleEl.style.display = allStops.length > 0 ? 'block' : 'none';
     }
 
     listEl.innerHTML = '';
 
     const rtextParts = [`${originGeo[0]},${originGeo[1]}`];
 
-    selectedWaypoints.forEach((wp, index) => {
+    allStops.forEach((wp, index) => {
         rtextParts.push(`${wp.lat},${wp.lon}`);
 
         const stopEl = document.createElement('div');
         stopEl.className = 'route-stop';
-        stopEl.innerHTML = `
-            <div class="route-stop-title">${index + 1}. ${wp.name}</div>
-            <button class="remove-btn" onclick="removeStation(${index})" title="Удалить">✖</button>
-        `;
+        if (wp.type === 'gas') {
+            stopEl.innerHTML = `
+                <div class="route-stop-title">${index + 1}. ${wp.name}</div>
+                <button class="remove-btn" onclick="removeStation(${wp.gasIndex})" title="Удалить">✖</button>
+            `;
+        } else {
+            stopEl.innerHTML = `
+                <div class="route-stop-title">${index + 1}. ${wp.name} (Город/Адрес)</div>
+            `;
+        }
         listEl.appendChild(stopEl);
     });
 
@@ -1224,18 +1510,24 @@ function updateRouteSidebar() {
 }
 
 // Фильтрация и рендер заправок
-function filterAndRenderStations() {
+let lastFilterParams = null;
+
+function filterAndRenderStations(force = false) {
     const showAll = document.getElementById('show-all').checked;
     const maxDistKm = parseFloat(document.getElementById('distance-slider').value);
-    const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
     const amenityFilter = getSelectedAmenities();
+    const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
 
-    // Запоминаем ID открытого балуна, чтобы он не закрылся при перерисовке
+    // Проверяем, изменились ли параметры фильтрации
+    const currentParams = JSON.stringify({ showAll, maxDistKm, amenityFilter, isRouteActive, routeId: routeGeoJsonCoords ? routeGeoJsonCoords.length : 0 });
+    if (!force && lastFilterParams === currentParams) return;
+    lastFilterParams = currentParams;
+
+    // Запоминаем ID открытого балуна
     const openBalloonData = objectManager.objects.balloon.getData();
     const openId = openBalloonData ? openBalloonData.id : null;
 
     objectManager.removeAll();
-
     const routeLine = buildTurfRouteLine(showAll, isRouteActive);
 
     const filtered = allFeatures.filter(feature => {
@@ -1303,6 +1595,49 @@ function filterAndRenderStations() {
     if (openId && objectManager.objects.getById(openId)) {
         objectManager.objects.balloon.open(openId);
     }
+}
+
+/**
+ * Плавное обновление статусов и цветов меток без полной перерисовки карты
+ */
+function updateMarkerStatusAndColors() {
+    console.log('[Status] Фоновое обновление статусов заправок...');
+    const isRouteActive = Boolean(originGeo && destGeo && routeGeoJsonCoords);
+
+    allFeatures.forEach(feature => {
+        const oldStatus = feature.properties.timeStatus;
+        const newStatus = getStationStatus(feature);
+
+        // Если статус изменился, обновляем метку
+        if (oldStatus !== newStatus) {
+            feature.properties.timeStatus = newStatus;
+            const [latS, lonS] = feature.geometry.coordinates;
+
+            // Обновляем содержимое балуна
+            feature.properties.balloonContentBody = buildBalloonHtml(feature, latS, lonS, feature.id, isRouteActive);
+
+            // Определяем новый пресет
+            let preset = ICON_STATION_DEFAULT;
+            const isAdded = selectedWaypoints.some(w => w.id == feature.id);
+
+            if (isAdded) preset = ICON_STATION_ADDED;
+            else if (newStatus === 'vremenno') preset = 'islands#redDotIcon';
+            else if (newStatus === 'permit') preset = 'islands#blackDotIcon';
+            else if (newStatus === 'break') preset = 'islands#orangeDotIcon';
+            else if (newStatus === 'closed') preset = 'islands#grayDotIcon';
+            else if (newStatus === 'open') preset = 'islands#greenDotIcon';
+            else if (newStatus === 'always') preset = 'islands#darkGreenDotIcon';
+            else if (newStatus === 'no_data') preset = 'islands#blueDotIcon';
+
+            feature.options = { preset };
+
+            // Если объект сейчас отображается на карте, обновляем его свойства и опции в ObjectManager
+            if (objectManager.objects.getById(feature.id)) {
+                objectManager.objects.setObjectProperties(feature.id, feature.properties);
+                objectManager.objects.setObjectOptions(feature.id, feature.options);
+            }
+        }
+    });
 }
 
 // Проверяет, соответствует ли заправка фильтрам по удобствам
@@ -1837,11 +2172,27 @@ window.addStationToRoute = function (stationId) {
         return;
     }
 
+    let routeLat = station.geometry.coordinates[0];
+    let routeLon = station.geometry.coordinates[1];
+
+    if (baseRouteGeoJsonCoords && baseRouteGeoJsonCoords.length >= 2) {
+        try {
+            const baseLine = turf.lineString(baseRouteGeoJsonCoords);
+            const snapped = turf.nearestPointOnLine(baseLine, turf.point([routeLon, routeLat]));
+            routeLat = snapped.geometry.coordinates[1];
+            routeLon = snapped.geometry.coordinates[0];
+        } catch (e) {
+            console.warn('Could not snap station to route:', e);
+        }
+    }
+
     selectedWaypoints.push({
         id: station.id,
         name: station.properties.nameClean,
         lat: station.geometry.coordinates[0],
-        lon: station.geometry.coordinates[1]
+        lon: station.geometry.coordinates[1],
+        routeLat,
+        routeLon
     });
 
     // Сортировка по порядку на маршруте
@@ -1890,6 +2241,12 @@ function useMyLocation(inputId) {
 
             ymaps.geocode([lat, lon]).then(function (res) {
                 const firstGeoObject = res.geoObjects.get(0);
+                if (firstGeoObject && !isInsideRussia(firstGeoObject)) {
+                    const country = firstGeoObject.getCountry() || 'Вне РФ';
+                    setStatus(`Мы работаем только в РФ (ваша локация: ${country})`);
+                    alert(`Мы работаем только в РФ (ваша локация: ${country})`);
+                    return;
+                }
                 const address = firstGeoObject ? firstGeoObject.getAddressLine() : `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
                 document.getElementById(inputId).value = address;
                 setStatus('Местоположение определено');
@@ -1930,7 +2287,8 @@ async function loadGuide() {
             lines.forEach(line => {
                 const li = document.createElement('li');
                 li.innerHTML = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                guideList.appendChild(li);
+                listEl.appendChild(li);
+
             });
         }
     } catch (err) {
@@ -1941,58 +2299,86 @@ async function loadGuide() {
 // --- РАБОТА С ОТЗЫВАМИ ---
 
 async function fetchComments() {
-    if (!supabaseClient) return;
-
     try {
-        const { data, error } = await supabaseClient
-            .from('comments')
-            .select('id, station_id, text, date, author_email')
-            .order('created_at', { ascending: true });
-
-        if (!error && data) {
+        const data = await api.call('/api/comments');
+        if (data && data.length > 0) {
             userComments = {};
+
+            // Сортируем на клиенте для надежности (от новых к старым)
+            data.sort((a, b) => {
+                // Если есть created_at, лучше по нему, но в data его может не быть.
+                // Поэтому парсим строку date "ДД.ММ.ГГГГ ЧЧ:ММ"
+                const parseDate = (s) => {
+                    if (!s) return 0;
+                    const parts = s.split(/[\s,]+/);
+                    if (parts.length < 2) return 0;
+                    const [d, t] = parts;
+                    const [day, month, year] = d.split('.');
+                    const [hour, min] = t.split(':');
+                    return new Date(year, month - 1, day, hour, min).getTime();
+                };
+                return parseDate(b.date) - parseDate(a.date);
+            });
+
             data.forEach(c => {
                 if (!userComments[c.station_id]) userComments[c.station_id] = [];
                 userComments[c.station_id].push({
+                    id: c.id,
                     text: c.text,
                     date: c.date,
-                    author_email: c.author_email
+                    author_email: c.author_email,
+                    created_at: c.created_at
                 });
             });
-            console.log('Comments loaded from Supabase');
+            const countChanged = (window.totalCommentsLoaded !== data.length);
+            window.totalCommentsLoaded = data.length;
 
-            // После загрузки проверяем, не открыт ли какой-то балун прямо сейчас
-            // Если открыт — обновляем в нем список отзывов
             const openCommentsLists = document.querySelectorAll('div[id^="comments-list-"]');
             openCommentsLists.forEach(list => {
                 const stId = list.id.replace('comments-list-', '');
-                console.log(`Polling: refreshing open balloon for station ${stId}`);
                 list.innerHTML = buildCommentsHtml(stId);
             });
-        } else if (error) {
-            console.warn('Supabase fetch error:', error);
+
+            if (countChanged) {
+                filterAndRenderStations();
+            }
         }
+
     } catch (e) {
-        console.error('Supabase exception:', e);
+        console.error('Comments fetch error:', e);
     }
 }
+
 
 function buildCommentsHtml(stationId) {
     const comments = userComments[stationId] || [];
     if (comments.length === 0) {
         return '<div class="no-comments">Пока нет отзывов. Будьте первым!</div>';
     }
-    // Копируем и разворачиваем, чтобы самые новые были сверху
-    return comments.slice().reverse().map(c => `
-        <div class="comment-item">
-            <div class="comment-text">${escapeHtml(c.text)}</div>
-            <div class="comment-meta">
-                ${c.author_email ? `<span class="comment-author" title="${c.author_email}">${c.author_email.split('@')[0]}</span> • ` : ''}
-                ${c.date}
+
+    const now = new Date().getTime();
+
+    // Отображаем как есть (уже отсортировано от новых к старым при загрузке)
+    return comments.map(c => {
+        let isNew = false;
+        if (c.created_at) {
+            const commentTime = new Date(c.created_at).getTime();
+            isNew = (now - commentTime) < 60000; // Подсвечиваем в течение минуты
+        } else if (c.isOptimistic) {
+            isNew = true;
+        }
+
+        return `
+            <div class="comment-item ${isNew ? 'new-comment' : ''}">
+                <div class="comment-text">${escapeHtml(c.text)}</div>
+                <div class="comment-meta">
+                    ${c.author_email ? `<span class="comment-author" title="${c.author_email}">${c.author_email.split('@')[0]}</span> • ` : ''}
+                    ${c.date} ${c.isOptimistic ? '<span style="font-style:italic; font-size:9px;">(отправка...)</span>' : ''}
+                </div>
+                ${c.id && c.id.length > 5 ? `<div style="display:none" class="comment-id-marker" data-id="${c.id}"></div>` : ''}
             </div>
-            ${c.id && c.id.length > 5 ? `<div style="display:none" class="comment-id-marker" data-id="${c.id}"></div>` : ''}
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
 function escapeHtml(text) {
@@ -2006,58 +2392,49 @@ async function onCommentSubmit(stationId) {
     const text = input.value.trim();
     if (!text) return;
 
-    if (!supabaseClient) {
-        let missing = [];
-        if (typeof CONFIG === 'undefined') missing.push('CONFIG undefined');
-        else {
-            if (!CONFIG.SUPABASE_URL) missing.push('SUPABASE_URL');
-            if (!CONFIG.SUPABASE_ANON_KEY) missing.push('SUPABASE_ANON_KEY');
-        }
-        alert('Система отзывов не настроена: ' + (missing.length ? 'отсутствуют [' + missing.join(', ') + ']' : 'причина неизвестна'));
-        return;
-    }
-
     const now = new Date();
     const dateStr = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
+    // OPTIMISTIC UI: Добавляем комментарий локально сразу
+    const newComment = {
+        station_id: String(stationId),
+        text,
+        date: dateStr,
+        author_email: currentUser?.email || 'Вы',
+        isOptimistic: true,
+        created_at: now.toISOString() // Временная метка для анимации
+    };
+
+    if (!userComments[stationId]) userComments[stationId] = [];
+    userComments[stationId].unshift(newComment);
+
+    // Сразу очищаем поле и обновляем UI в балуне
+    input.value = '';
+    const listEl = document.getElementById(`comments-list-${stationId}`);
+    if (listEl) {
+        listEl.innerHTML = buildCommentsHtml(stationId);
+    }
+    toggleCommentForm(stationId);
+
     try {
-        const newComment = {
+        await api.call('/api/comments', 'POST', {
             station_id: String(stationId),
             text,
             date: dateStr,
-            user_id: currentUser?.id || null,
             author_email: currentUser?.email || null
-        };
+        });
 
-        const { error } = await supabaseClient
-            .from('comments')
-            .insert([newComment]);
-
-        if (!error) {
-            input.value = '';
-            // Локально обновляем данные для мгновенного отображения
-            if (!userComments[stationId]) userComments[stationId] = [];
-            userComments[stationId].push({
-                text,
-                date: dateStr,
-                author_email: currentUser?.email || null
-            });
-
-            // Перерисовываем весь балун, чтобы обновить состояние (новости, флаги и т.д.)
-            objectManager.objects.balloon.setData(objectManager.objects.getById(stationId));
-
-            // Скрываем форму обратно
-            toggleCommentForm(stationId);
-            console.log('Comment saved to Supabase');
-        } else {
-            console.error('Supabase insert error:', error);
-            alert('Не удалось отправить отзыв. Проверьте настройки базы данных.');
-        }
+        // После успешной отправки мы не удаляем optimistic сразу, 
+        // он будет заменен при следующем fetchComments (каждые 5 сек)
     } catch (e) {
-        console.error('Supabase insert exception:', e);
-        alert('Ошибка сети при отправке отзыва.');
+        console.error('Comment submit error:', e);
+        // В случае ошибки удаляем локальный комментарий
+        userComments[stationId] = userComments[stationId].filter(c => c !== newComment);
+        if (listEl) listEl.innerHTML = buildCommentsHtml(stationId);
+        alert('Ошибка при отправке отзыва.');
     }
 }
+
 
 function toggleCommentForm(stationId) {
     const formWrap = document.getElementById(`comment-form-wrap-${stationId}`);
@@ -2079,28 +2456,19 @@ function toggleCommentForm(stationId) {
 let savedRoutes = [];
 
 async function fetchSavedRoutes() {
-    if (!supabaseClient || !currentUser) return;
+    if (!currentUser) return;
     try {
-        const { data, error } = await supabaseClient
-            .from('saved_routes')
-            .select('*')
-            .order('created_at', { ascending: false });
-
-        if (!error && data) {
-            savedRoutes = data;
-            renderSavedRoutes();
-            console.log('Saved routes loaded:', savedRoutes.length);
-        } else if (error) {
-            console.warn('Error fetching routes:', error);
-        }
+        const data = await api.call('/api/saved_routes');
+        savedRoutes = data;
+        renderSavedRoutes();
     } catch (e) {
-        console.error('Saved routes exception:', e);
+        console.error('Saved routes error:', e);
     }
 }
 
 async function saveCurrentRoute(name) {
-    if (!supabaseClient || !currentUser) {
-        alert('Войдите, чтобы сохранять маршруты');
+    if (!currentUser) {
+        openAuthModal('login');
         return;
     }
 
@@ -2109,16 +2477,8 @@ async function saveCurrentRoute(name) {
         return;
     }
 
-    // Проверка корректности координат (Yandex возвращает [lat, lon])
-    if (isNaN(originGeo[0]) || isNaN(originGeo[1]) || isNaN(destGeo[0]) || isNaN(destGeo[1])) {
-        alert('Ошибка в координатах маршрута. Попробуйте еще раз.');
-        console.error('Invalid coords for saving:', { originGeo, destGeo });
-        return;
-    }
-
     try {
         const newRoute = {
-            user_id: currentUser.id,
             name: name || `Маршрут от ${new Date().toLocaleDateString()}`,
             origin_name: originName || 'Точка А',
             dest_name: destName || 'Точка Б',
@@ -2127,48 +2487,27 @@ async function saveCurrentRoute(name) {
             waypoints: selectedWaypoints || []
         };
 
-        console.log('Saving route to Supabase...', newRoute);
-
-        const { data, error } = await supabaseClient
-            .from('saved_routes')
-            .insert([newRoute])
-            .select();
-
-        if (!error && data) {
-            savedRoutes.unshift(data[0]);
-            renderSavedRoutes();
-            closeSaveRouteModal();
-            console.log('Route saved successfully:', data[0]);
-        } else {
-            console.error('Supabase error saving route:', error);
-            alert(`Ошибка при сохранении: ${error?.message || 'Неизвестная ошибка'}`);
-        }
+        const data = await api.call('/api/saved_routes', 'POST', newRoute);
+        savedRoutes.unshift(data);
+        renderSavedRoutes();
+        closeSaveRouteModal();
     } catch (e) {
-        console.error('Save route exception:', e);
-        alert('Внутренняя ошибка при сохранении');
+        console.error('Save route error:', e);
+        alert('Ошибка при сохранении маршрута');
     }
 }
 
 async function deleteSavedRoute(id) {
     if (!confirm('Удалить этот маршрут?')) return;
-
     try {
-        const { error } = await supabaseClient
-            .from('saved_routes')
-            .delete()
-            .eq('id', id);
-
-        if (!error) {
-            savedRoutes = savedRoutes.filter(r => r.id !== id);
-            renderSavedRoutes();
-            console.log('Route deleted');
-        } else {
-            console.error('Error deleting route:', error);
-        }
+        await api.call(`/api/saved_routes/${id}`, 'DELETE');
+        savedRoutes = savedRoutes.filter(r => r.id !== id);
+        renderSavedRoutes();
     } catch (e) {
-        console.error('Delete route exception:', e);
+        console.error('Delete route error:', e);
     }
 }
+
 
 function renderSavedRoutes() {
     const listEl = document.getElementById('routes-list');
@@ -2222,7 +2561,9 @@ window.loadSavedRoute = function (id) {
 
     closeRoutesModal();
     requestRouteAndRedraw();
+    document.getElementById('reset-route').style.display = 'block';
 };
+
 
 function openRoutesModal() {
     document.getElementById('routes-modal').style.display = 'flex';
@@ -2479,16 +2820,14 @@ async function toggleFavorite(stId) {
 
     saveFavorites();
 
-    // Синхронизация с облаком
     if (currentUser) {
         if (isAdding) {
-            await syncFavoriteToSupabase(stId);
+            await syncFavoriteToBackend(stId);
         } else {
-            await removeFavoriteFromSupabase(stId);
+            await removeFavoriteFromBackend(stId);
         }
     }
 
-    // Находим все открытые балуны и обновляем текст кнопки, если нужно
     const btn = document.querySelector('.fav-btn-balloon');
     if (btn) {
         const isFav = favoriteStations.includes(stId);
@@ -2496,6 +2835,7 @@ async function toggleFavorite(stId) {
         btn.innerHTML = isFav ? '⭐' : '☆';
     }
 }
+
 
 function goToStation(stId) {
     // Находим объект
@@ -2587,11 +2927,6 @@ function closeReportModal() {
 async function submitErrorReport(e) {
     e.preventDefault();
 
-    if (!supabaseClient) {
-        alert('Система отправки ошибок не настроена.');
-        return;
-    }
-
     const submitBtn = document.getElementById('report-submit-btn');
     const errorEl = document.getElementById('report-error');
     const successEl = document.getElementById('report-success');
@@ -2612,17 +2947,12 @@ async function submitErrorReport(e) {
     errorEl.style.display = 'none';
 
     try {
-        const { error } = await supabaseClient
-            .from('error_reports')
-            .insert([{
-                station_id: stationId || null,
-                error_type: errorType,
-                description: description,
-                author_email: email,
-                user_id: currentUser?.id || null
-            }]);
-
-        if (error) throw error;
+        await api.call('/api/error_reports', 'POST', {
+            station_id: stationId || null,
+            error_type: errorType,
+            description: description,
+            author_email: email
+        });
 
         successEl.innerText = 'Спасибо! Информация отправлена на модерацию.';
         successEl.style.display = 'block';
@@ -2630,7 +2960,6 @@ async function submitErrorReport(e) {
 
         setTimeout(() => {
             closeReportModal();
-            // Сбрасываем видимость формы для следующего раза
             document.getElementById('report-form').style.display = 'block';
         }, 3000);
 
@@ -2644,48 +2973,219 @@ async function submitErrorReport(e) {
     }
 }
 
+
 // Вызываем фильтрацию при загрузке
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(filterAndRenderStations, 1000); // Даем время на загрузку данных
 });
 
-// Подписка на новые комментарии в реальном времени
+// Подписка на новые комментарии (заменена на поллинг в init)
 function subscribeToComments() {
-    if (!supabaseClient) return;
-
-    console.log('Subscribing to real-time comments...');
-
-    supabaseClient
-        .channel('public:comments')
-        .on('postgres_changes', {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'comments'
-        }, payload => {
-            console.log('New comment received via Realtime:', payload.new);
-            const newComment = payload.new;
-            const stId = newComment.station_id;
-
-            // Обновляем локальный кэш
-            if (!userComments[stId]) userComments[stId] = [];
-
-            // Проверяем, нет ли уже такого комментария (чтобы не дублировать для автора)
-            const exists = userComments[stId].some(c => c.id === newComment.id);
-            if (!exists) {
-                userComments[stId].push({
-                    id: newComment.id,
-                    text: newComment.text,
-                    date: newComment.date,
-                    author: newComment.author_email || 'Аноним'
-                });
-
-                // Обновляем UI, если открыт балун именно этой заправки
-                const list = document.getElementById(`comments-list-${stId}`);
-                if (list) {
-                    console.log(`Updating comments list for station ${stId}`);
-                    list.innerHTML = buildCommentsHtml(stId);
-                }
-            }
-        })
-        .subscribe();
+    console.log('Real-time subscription removed, using polling instead.');
 }
+
+
+// === ADMIN PANEL LOGIC ===
+function initAdmin() {
+    const adminBtn = document.getElementById('admin-btn');
+    const adminModal = document.getElementById('admin-modal');
+    const closeAdmin = document.getElementById('close-admin');
+    const tabBtns = document.querySelectorAll('.admin-tab-btn');
+
+    if (adminBtn) {
+        adminBtn.addEventListener('click', () => {
+            adminModal.style.display = 'flex';
+            loadAdminReports();
+            loadAdminComments();
+            loadAdminUsers();
+        });
+
+    }
+
+    const userSearchInput = document.getElementById('admin-user-search');
+    if (userSearchInput) {
+        userSearchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filtered = adminUsers.filter(u => u.email.toLowerCase().includes(query));
+            renderAdminUsersList(filtered);
+        });
+    }
+
+    if (closeAdmin) {
+        closeAdmin.addEventListener('click', () => {
+            adminModal.style.display = 'none';
+        });
+    }
+
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            tabBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const target = btn.dataset.tab;
+            document.querySelectorAll('.admin-tab-content').forEach(c => {
+                c.style.display = (c.id === target) ? 'block' : 'none';
+            });
+        });
+    });
+}
+
+function getStationName(id) {
+    if (!id) return '-';
+    const feature = allFeatures.find(f => String(f.id) === String(id));
+    return feature ? feature.properties.nameClean : `ID: ${id}`;
+}
+
+async function loadAdminReports() {
+    try {
+        const reports = await api.call('/api/admin/error_reports');
+        // Сортировка на клиенте (от новых к старым)
+        reports.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        const list = document.getElementById('admin-reports-list');
+        list.innerHTML = reports.map(r => `
+            <tr class="report-status-${r.status}">
+                <td>${new Date(r.created_at).toLocaleString()}</td>
+                <td>${getStationName(r.station_id)}</td>
+                <td>${r.error_type}</td>
+                <td>${r.description || ''}</td>
+                <td>${r.author_email || ''}</td>
+                <td>
+                    <div class="admin-actions-cell">
+                        <select onchange="updateAdminReportStatus('${r.id}', this.value)">
+                            <option value="pending" ${r.status === 'pending' ? 'selected' : ''}>Ожидает</option>
+                            <option value="fixed" ${r.status === 'fixed' ? 'selected' : ''}>Исправлено</option>
+                            <option value="rejected" ${r.status === 'rejected' ? 'selected' : ''}>Отклонено</option>
+                        </select>
+                        <button class="admin-btn-delete" onclick="deleteAdminReport('${r.id}')">X</button>
+                    </div>
+                </td>
+
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error('Admin reports load fail:', err);
+    }
+}
+
+
+
+async function loadAdminComments() {
+    try {
+        const comments = await api.call('/api/admin/comments');
+
+        // Сортировка на клиенте (от новых к старым)
+        const parseDate = (s) => {
+            if (!s) return 0;
+            const parts = s.split(/[\s,]+/);
+            if (parts.length < 2) return 0;
+            const [d, t] = parts;
+            const [day, month, year] = d.split('.');
+            const [hour, min] = t.split(':');
+            return new Date(year, month - 1, day, hour, min).getTime();
+        };
+        comments.sort((a, b) => parseDate(b.date) - parseDate(a.date));
+
+        const list = document.getElementById('admin-comments-list');
+        list.innerHTML = comments.map(c => `
+            <tr>
+                <td>${c.date}</td>
+                <td>${getStationName(c.station_id)}</td>
+
+                <td>${c.text}</td>
+                <td>${c.author_email}</td>
+                <td><button class="admin-btn-delete" onclick="deleteAdminComment('${c.id}')">Удалить</button></td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        console.error('Admin comments load fail:', err);
+    }
+}
+
+async function loadAdminUsers() {
+    try {
+        const users = await api.call('/api/admin/users');
+        // Сортировка на клиенте (от новых к старым)
+        users.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        adminUsers = users; // Сохраняем для поиска
+
+        // Сбрасываем поиск при загрузке
+        const searchInput = document.getElementById('admin-user-search');
+        if (searchInput) searchInput.value = '';
+
+        renderAdminUsersList(users);
+    } catch (err) {
+        console.error('Admin users load fail:', err);
+    }
+}
+
+function renderAdminUsersList(users) {
+    const list = document.getElementById('admin-users-list');
+    if (!list) return;
+
+    list.innerHTML = users.map(u => `
+        <tr>
+            <td>${u.email}</td>
+            <td>
+                <input type="checkbox" ${u.is_admin ? 'checked' : ''} 
+                       onchange="toggleAdminStatus('${u.id}')">
+            </td>
+            <td>${new Date(u.created_at).toLocaleDateString()}</td>
+            <td>
+                <button class="admin-btn-delete" onclick="deleteAdminUser('${u.id}')">Удалить</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+window.updateAdminReportStatus = async function (id, status) {
+    try {
+        await api.call(`/api/admin/error_reports/status/${id}`, 'POST', { status });
+        loadAdminReports();
+    } catch (err) {
+        alert('Ошибка обновления статуса: ' + err.message);
+    }
+};
+
+window.toggleAdminStatus = async function (id) {
+    try {
+        await api.call(`/api/admin/users/toggle_admin/${id}`, 'POST');
+        loadAdminUsers();
+    } catch (err) {
+        alert('Ошибка изменения прав: ' + err.message);
+    }
+};
+
+window.deleteAdminUser = async function (id) {
+    if (!confirm('Удалить этого пользователя?')) return;
+    try {
+        await api.call(`/api/admin/users/${id}`, 'DELETE');
+        loadAdminUsers();
+    } catch (err) {
+        alert('Ошибка при удалении: ' + err.message);
+    }
+};
+
+window.deleteAdminReport = async function (id) {
+
+    if (!confirm('Удалить этот отчет?')) return;
+    try {
+        await api.call(`/api/admin/error_reports/${id}`, 'DELETE');
+        loadAdminReports();
+    } catch (err) {
+        alert('Ошибка при удалении: ' + err.message);
+    }
+};
+
+window.deleteAdminComment = async function (id) {
+    if (!confirm('Удалить этот отзыв?')) return;
+    try {
+        await api.call(`/api/admin/comments/${id}`, 'DELETE');
+        loadAdminComments();
+        fetchComments(); // Обновляем кэш отзывов
+    } catch (err) {
+        alert('Ошибка при удалении: ' + err.message);
+    }
+};
+
+// Вызов инициализации в конце bindUIEvents или init
+initAdmin();

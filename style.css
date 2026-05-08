@@ -8,26 +8,26 @@
     --color-go-btn-dark: #1b5e20;
     --color-danger: #d32f2f;
     --color-danger-dark: #b71c1c;
-    --color-text-main: #333;
-    --color-text-muted: #555;
-    --color-text-faint: #666;
-    --color-text-label: #444;
-    --color-border: #ccc;
-    --color-border-light: #eee;
-    --color-stop-bg: #fff8e1;
-    --color-panel-bg: rgba(255, 255, 255, 0.95);
+    --color-text-main: #1a1a1a;
+    --color-text-muted: #4a4a4a;
+    --color-text-faint: #757575;
+    --color-text-label: #2c2c2c;
+    --color-border: #e0e0e0;
+    --color-border-light: #f0f0f0;
+    --color-stop-bg: #fffbf0;
+    --color-panel-bg: rgba(255, 255, 255, 0.85);
 
     /* Размеры */
-    --panel-width: 320px;
-    --border-radius-sm: 4px;
-    --border-radius-md: 6px;
-    --border-radius-lg: 12px;
+    --panel-width: 340px;
+    --border-radius-sm: 8px;
+    --border-radius-md: 12px;
+    --border-radius-lg: 20px;
 
     /* Тени */
-    --shadow-panel: 0 4px 15px rgba(0, 0, 0, 0.15);
-    --shadow-stop: 0 1px 3px rgba(0, 0, 0, 0.1);
-    --shadow-btn: 0 2px 5px rgba(0, 0, 0, 0.2);
-    --shadow-balloon-btn: 0 2px 4px rgba(0, 0, 0, 0.1);
+    --shadow-panel: 0 10px 40px rgba(0, 0, 0, 0.12);
+    --shadow-stop: 0 2px 8px rgba(0, 0, 0, 0.06);
+    --shadow-btn: 0 4px 12px rgba(0, 0, 0, 0.15);
+    --shadow-balloon-btn: 0 4px 10px rgba(0, 0, 0, 0.08);
 }
 
 /* Базовые стили */
@@ -62,18 +62,22 @@ h3 {
 /* Боковая панель управления */
 #controls {
     position: absolute;
-    top: 15px;
-    left: 15px;
+    top: 20px;
+    left: 20px;
     z-index: 100;
     width: var(--panel-width);
-    max-height: 90vh;
-    padding: 20px;
+    max-height: calc(100vh - 40px);
+    padding: 24px;
     overflow-y: auto;
 
     background: var(--color-panel-bg);
     border-radius: var(--border-radius-lg);
     box-shadow: var(--shadow-panel);
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Строка статуса под кнопкой */
@@ -104,14 +108,22 @@ h3 {
 }
 
 .my-loc-btn {
-    width: auto;
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
     flex-shrink: 0;
-    padding: 10px 12px;
+    padding: 0 !important;
     background-color: var(--color-border-light);
     border: 1px solid var(--color-border);
     font-size: 16px;
     color: var(--color-text-main);
     z-index: 10003;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* Классы для эффекта "выпадения" подсказок */
@@ -131,13 +143,24 @@ h3 {
 }
 
 input[type="text"],
+input[type="number"],
 button {
     width: 100%;
-    padding: 10px;
-    margin-bottom: 12px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius-md);
     font-size: 14px;
+    background: #fff;
+    color: var(--color-text-main);
+    transition: all 0.2s ease;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.2);
 }
 
 .search-divider {
@@ -183,15 +206,20 @@ button {
     flex-direction: column;
 }
 
-.swap-btn {
+.route-connector-row {
+    position: relative;
+    height: 0;
+    z-index: 10;
+}
+
+.connector-swap-btn,
+.connector-add-btn {
     position: absolute;
-    right: 44px;
-    top: 36px;
+    top: -14px;
     width: 28px !important;
     height: 28px !important;
     padding: 0 !important;
     margin: 0 !important;
-    z-index: 10;
     background: white !important;
     border: 1px solid var(--color-border) !important;
     border-radius: 50% !important;
@@ -199,12 +227,22 @@ button {
     align-items: center;
     justify-content: center;
     color: var(--color-primary) !important;
+    font-size: 14px;
     cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     transition: all 0.2s ease;
 }
 
-.swap-btn:hover {
+.connector-swap-btn {
+    left: -14px;
+}
+
+.connector-add-btn {
+    right: 44px;
+}
+
+.connector-swap-btn:hover,
+.connector-add-btn:hover {
     background: #f5f5f5 !important;
     transform: scale(1.1);
     box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
@@ -220,12 +258,19 @@ button {
     border: none;
     cursor: pointer;
     font-weight: 600;
-    color: var(--color-text-main);
-    transition: background 0.2s;
+    color: #000;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s ease;
 }
 
 button:hover {
     background-color: var(--color-accent-dark);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+button:active {
+    transform: translateY(0);
 }
 
 input[type="range"] {
@@ -525,10 +570,12 @@ input[type="range"] {
     flex: 1;
     /* Чтобы занимала все доступное место */
     margin: 0;
-    padding: 8px 12px;
+    padding: 0 15px;
+    height: 40px !important;
+    line-height: 40px;
 
     background: var(--color-accent);
-    border: none;
+    border: 1px solid var(--color-accent);
     border-radius: var(--border-radius-md);
     box-shadow: var(--shadow-balloon-btn);
 
@@ -536,6 +583,7 @@ input[type="range"] {
     font-weight: bold;
     font-size: 13px;
     font-family: inherit;
+    display: flex;
     align-items: center;
     justify-content: center;
     text-decoration: none;
@@ -752,6 +800,18 @@ input[type="range"] {
     padding: 6px 10px;
     border-radius: 4px;
     margin-bottom: 6px;
+    transition: all 0.3s ease;
+}
+
+@keyframes highlight-new {
+    0% { background-color: #fff8e1; transform: scale(1.02); border-left-color: #2e7d32; }
+    50% { background-color: #fffde7; transform: scale(1.01); }
+    100% { background-color: #fdfdfd; transform: scale(1); border-left-color: #2e7d32; }
+}
+
+.comment-item.new-comment {
+    animation: highlight-new 3s ease-out forwards;
+    border-left-width: 4px;
 }
 
 .comment-text {
@@ -873,7 +933,8 @@ input[type="range"] {
 
 .balloon-actions {
     display: flex;
-    align-items: center;
+    align-items: stretch;
+    /* Растягиваем, чтобы высота была одинаковой */
     gap: 8px;
     margin-top: 10px;
     width: 100%;
@@ -1235,8 +1296,8 @@ input[type="range"] {
     border: 1px solid var(--color-border) !important;
     color: #888 !important;
     font-size: 18px;
-    width: 36px;
-    height: 36px;
+    width: 40px !important;
+    height: 40px !important;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1512,21 +1573,27 @@ input[type="range"] {
 
 .fuel-inputs-row {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap;
+    /* Разрешаем перенос на новую строку */
+    gap: 12px;
     width: 100%;
 }
 
 .fuel-input-group {
-    flex: 1;
+    flex: 1 1 80px;
+    /* Позволяем расти и сжиматься, но минимум 80px */
     display: flex;
     flex-direction: column;
     gap: 4px;
+    min-width: 0;
+    /* Важно для flex-контейнеров */
 }
 
 .fuel-input-group label {
     font-size: 11px;
     color: var(--color-text-faint);
-    white-space: nowrap;
+    line-height: 1.2;
+    /* Убираем white-space: nowrap, чтобы текст мог переноситься */
 }
 
 .fuel-input-group input {
@@ -1583,8 +1650,8 @@ input[type="range"] {
 }
 
 .balloon-report-err-btn {
-    width: 36px;
-    height: 36px;
+    width: 40px !important;
+    height: 40px !important;
     border-radius: var(--border-radius-md);
     background: #fff !important;
     border: 1px solid #ff5252 !important;
@@ -1698,4 +1765,215 @@ input[type="range"] {
     border: 1px solid var(--color-border) !important;
     border-radius: var(--border-radius-md) !important;
     font-size: 15px !important;
+}
+
+/* Стили для промежуточных точек (городов) */
+.add-via-btn {
+    width: 100%;
+    margin-bottom: 20px;
+    padding: 10px;
+    background-color: transparent;
+    color: var(--color-primary);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--border-radius-lg);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.add-via-btn:hover {
+    background-color: var(--color-bg-hover);
+    border-color: var(--color-primary);
+}
+
+.via-point-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    width: 100%;
+}
+
+.via-point-group .input-wrapper {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.via-point-group .input-wrapper input[type="text"] {
+    width: 100%;
+}
+
+.remove-via-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+    flex-shrink: 0;
+    padding: 0 !important;
+    background-color: var(--color-border-light);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-md);
+    font-size: 16px;
+    color: var(--color-danger);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.remove-via-btn:hover {
+    background-color: var(--color-danger);
+    color: white;
+}
+
+/* Admin Panel Styles */
+.admin-modal-content {
+    max-width: 900px;
+    background: rgba(255, 255, 255, 0.9) !important;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.admin-tabs {
+    display: flex;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--color-border-light);
+    gap: 10px;
+}
+
+.admin-tab-btn {
+    padding: 12px 24px;
+    background: none !important;
+    /* Убираем желтый фон */
+    border: none !important;
+    border-bottom: 3px solid transparent !important;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--color-text-faint);
+    transition: all 0.2s;
+    width: auto !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+}
+
+.admin-tab-btn:hover {
+    color: var(--color-text-main);
+    background: rgba(0, 0, 0, 0.05) !important;
+}
+
+.admin-tab-btn.active {
+    color: var(--color-accent-dark) !important;
+    border-bottom-color: var(--color-accent-dark) !important;
+    background: none !important;
+}
+
+
+.admin-table-wrapper {
+    overflow-x: auto;
+    width: 100%;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.admin-table th,
+.admin-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--color-border-light);
+}
+
+.admin-table th {
+    background: #f9f9f9;
+    font-weight: bold;
+    color: var(--color-text-main);
+}
+
+.admin-btn-delete {
+    background: var(--color-danger) !important;
+    color: white !important;
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+    border-radius: 4px !important;
+    width: auto !important;
+    margin: 0 !important;
+}
+
+.admin-btn-delete:hover {
+    background: var(--color-danger-dark) !important;
+}
+
+/* Admin Status Select Styling */
+.admin-table select {
+    padding: 6px 10px;
+    border: 1.5px solid var(--color-border);
+    border-radius: var(--border-radius-sm);
+    font-size: 12px;
+    font-family: inherit;
+    background-color: white;
+    cursor: pointer;
+    transition: all 0.2s;
+    outline: none;
+}
+
+.admin-table select:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px rgba(255, 204, 0, 0.2);
+}
+
+/* Status colors in the table rows */
+.report-status-pending {
+    background-color: rgba(255, 204, 0, 0.05);
+}
+
+.report-status-fixed {
+    background-color: rgba(46, 125, 50, 0.05);
+}
+
+.report-status-rejected {
+    background-color: rgba(211, 47, 47, 0.05);
+}
+
+.admin-table select option {
+    background: white;
+    color: var(--color-text-main);
+}
+
+.admin-actions-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.admin-search-wrap {
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: flex-start;
+}
+
+.admin-search-input {
+    width: 100%;
+    max-width: 300px;
+    padding: 10px 15px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    background: var(--color-bg-card);
+    color: var(--color-text-main);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.admin-search-input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgba(255, 204, 0, 0.1);
 }
