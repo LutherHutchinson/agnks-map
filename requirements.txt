@@ -1,0 +1,6 @@
+psycopg2-binary
+PyJWT
+Werkzeug
+requests
+turfpy
+geojson

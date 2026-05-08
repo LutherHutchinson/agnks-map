@@ -1,6 +1,6 @@
-config.local.js
-.DS_Store
-
-config.js
-
+__pycache__/
+*.pyc
 gazprom_stations_cache.json
+config.js
+.DS_Store
+EOF

@@ -6,21 +6,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>АГНКС Маршруты</title>
 
-    <link rel="stylesheet" href="style.css?v=2">
+    <link rel="stylesheet" href="style.css">
 
     <!-- Конфигурация (ключи) -->
-    <script src="config.js?v=2"></script>
-    <script>
-        document.write('<script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=' + CONFIG.YANDEX_MAPS_API_KEY + '" type="text/javascript"><\/script>');
+    <script src="config.js"></script>
+    <script type="text/javascript">
+        // Динамическая загрузка Яндекс.Карт с использованием ключа из конфига
+        (function () {
+            const apiKey = (typeof CONFIG !== 'undefined' && CONFIG.YANDEX_MAPS_API_KEY) ? CONFIG.YANDEX_MAPS_API_KEY : '';
+            const script = document.createElement('script');
+            script.type = 'text/javascript';
+            script.src = `https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=${apiKey}`;
+            document.head.appendChild(script);
+        })();
     </script>
+
 
     <!-- Turf.js -->
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
 
-    <!-- Supabase SDK -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
 </head>
+
 
 <body>
     <!-- Кнопка гамбургер для мобилок -->
@@ -50,21 +56,25 @@
         <div class="search-divider">или проложить маршрут:</div>
         <button id="my-routes-btn" class="my-routes-large-btn" style="display: none;">🗺️ Мои сохраненные
             маршруты</button>
+        <button id="admin-btn" class="my-routes-large-btn admin-only-btn"
+            style="display: none; background: #ff4757; color: white;">⚙️ Админ-панель</button>
+
 
         <!-- Ввод маршрута -->
-        <div class="route-inputs">
-            <div class="input-wrapper">
+        <div class="route-inputs" id="route-inputs-container">
+            <div class="input-wrapper" id="origin-wrapper">
                 <input type="text" id="route-from" placeholder="Откуда">
                 <button id="my-loc-from" class="my-loc-btn" title="Моё местоположение">📍</button>
             </div>
 
-            <button id="swap-locations" class="swap-btn" title="Поменять местами">⇅</button>
+            <div id="via-points-container" style="width: 100%; display: block;"></div>
 
-            <div class="input-wrapper">
+            <div class="input-wrapper" id="dest-wrapper">
                 <input type="text" id="route-to" placeholder="Куда">
                 <button id="my-loc-to" class="my-loc-btn" title="Моё местоположение">📍</button>
             </div>
         </div>
+
         <button id="build-route">Проложить маршрут</button>
 
         <div class="fuel-calc-section">
@@ -213,7 +223,7 @@
 
                 <!-- Видеоплеер (локальный файл) -->
                 <div class="video-container">
-                    <video src="metan.mp4" controls preload="metadata"></video>
+                    <video id="guide-video" data-src="metan.mp4" controls preload="metadata"></video>
                 </div>
 
                 <!-- Текстовая инструкция -->
@@ -322,7 +332,95 @@
         </div>
     </div>
 
-    <script src="app.js?v=3"></script>
+    <!-- Модальное окно отзывов -->
+    <div id="reviews-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <button id="close-reviews-btn" class="close-btn" type="button" onclick="closeReviews()">&times;</button>
+            <h2 id="reviews-title">Отзывы</h2>
+            <div class="modal-body">
+                <div id="reviews-list" class="reviews-list-container">
+                    <!-- Отзывы будут здесь -->
+                </div>
+                <hr>
+                <div class="add-review-form">
+                    <h3>Оставить отзыв</h3>
+                    <textarea id="new-review-text" placeholder="Ваш отзыв..." rows="3"></textarea>
+                    <button id="submit-review-btn" class="build-route-btn">Отправить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Модальное окно Админки -->
+    <div id="admin-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content admin-modal-content">
+            <button id="close-admin" class="close-btn">&times;</button>
+            <h2>Панель администратора</h2>
+            <div class="admin-tabs">
+                <button class="admin-tab-btn active" data-tab="admin-reports">Ошибки</button>
+                <button class="admin-tab-btn" data-tab="admin-comments">Модерация отзывов</button>
+                <button class="admin-tab-btn" data-tab="admin-users">Пользователи</button>
+            </div>
+
+            <div class="modal-body">
+                <div id="admin-reports" class="admin-tab-content">
+                    <div class="admin-table-wrapper">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Дата</th>
+                                    <th>Станция</th>
+                                    <th>Тип</th>
+                                    <th>Описание</th>
+                                    <th>Email</th>
+                                    <th>Действие</th>
+
+                                </tr>
+                            </thead>
+                            <tbody id="admin-reports-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="admin-comments" class="admin-tab-content" style="display: none;">
+                    <div class="admin-table-wrapper">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Дата</th>
+                                    <th>Станция</th>
+                                    <th>Текст</th>
+                                    <th>Автор</th>
+                                    <th>Действие</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-comments-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="admin-users" class="admin-tab-content" style="display: none;">
+                    <div class="admin-search-wrap">
+                        <input type="text" id="admin-user-search" placeholder="Поиск по Email..."
+                            class="admin-search-input">
+                    </div>
+                    <div class="admin-table-wrapper">
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Email</th>
+                                    <th>Админ</th>
+                                    <th>Дата регистрации</th>
+                                    <th>Действие</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-users-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="app.js"></script>
 
 </body>
 
